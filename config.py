@@ -9,6 +9,8 @@ UPDATED 2026-09-19:
 - New: NVIDIA NIM integration (integrate.api.nvidia.com/v1)
 - New: DeepSeek V4 Flash free via OpenRouter AND NVIDIA NIM
 """
+import sys
+import os
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -235,8 +237,7 @@ class TokenOptimiserConfig:
 config = TokenOptimiserConfig()
 
 # Load user overrides if present (in user repo, not in core)
-import os as _os
-_current_dir = _os.path.dirname(_os.path.abspath(__file__))
+_current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 try:
