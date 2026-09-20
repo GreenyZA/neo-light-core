@@ -64,7 +64,7 @@ def token_optimiser_assess(task: str, context: Optional[Dict] = None) -> Dict[st
     Assess a task and produce a routing decision.
     Returns tier, confidence, rationale, matched categories, and scope.
     """
-    from token_optimiser.router import TokenRouter, LearningLog
+    from .router import TokenRouter, LearningLog
 
     router = TokenRouter()
     log = LearningLog()
@@ -109,7 +109,7 @@ def token_optimiser_plan(task: str, subtasks: Optional[List[str]] = None) -> Dic
     """
     Produce a Token Budget Plan for a multi-step task.
     """
-    from token_optimiser.router import TokenRouter, LearningLog
+    from .router import TokenRouter, LearningLog
 
     router = TokenRouter()
     log = LearningLog()
@@ -180,7 +180,7 @@ def token_optimiser_toggle(enabled: bool) -> Dict[str, Any]:
     """
     Enable or disable the token optimiser.
     """
-    from token_optimiser.config import config
+    from .config import config
 
     old_state = config.enabled
     config.enabled = enabled
@@ -208,8 +208,8 @@ def token_optimiser_status() -> Dict[str, Any]:
     """
     Get token optimiser status and recent activity.
     """
-    from token_optimiser.config import config
-    from token_optimiser.router import LearningLog
+    from .config import config
+    from .router import LearningLog
 
     log = LearningLog()
     recent = log.get_recent(10)
@@ -257,7 +257,7 @@ def token_optimiser_feedback(task: str, outcome: str, notes: Optional[str] = Non
     """
     Record feedback on a routing decision.
     """
-    from token_optimiser.router import TokenRouter, LearningLog
+    from .router import TokenRouter, LearningLog
 
     router = TokenRouter()
     log = LearningLog()

@@ -9,7 +9,7 @@ and logs governance decisions to work/boa/governance/.
 Importable but optional — not required by the token_optimiser package.
 
 Usage:
-    from token_optimiser.boa import run_boa, classify_itil, decide_governance
+    from .boa import run_boa, classify_itil, decide_governance
     result = run_boa("What's the best way to handle auth in a microservice?")
     gov = decide_governance("add JWT to microservice API")  # fast, for router
 
@@ -32,8 +32,8 @@ _PACKAGE_ROOT = Path(__file__).resolve().resolve().parent.parent
 if str(_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PACKAGE_ROOT))
 
-from token_optimiser.mock_backends import T1MockBackend, T1PrivacyBackend, T2MockBackend, T3MockBackend
-from token_optimiser.router import classify_itil
+from .mock_backends import T1MockBackend, T1PrivacyBackend, T2MockBackend, T3MockBackend
+from .router import classify_itil
 
 # monica_integration imported lazily inside run_boa to avoid circular imports
 # when monica_integration imports lightweight BOA classifiers for governance.
@@ -453,7 +453,7 @@ def decide_governance(task: str, context: Optional[Dict[str, Any]] = None, fast:
 
         # Tier via lazy monica (already guarded at run_boa level too)
         try:
-            from token_optimiser.monica_integration import optimise
+            from .monica_integration import optimise
             decision = optimise(task, context or {})
             tier = decision.get("tier", "T2")
             base_rationale = decision.get("rationale", "")
@@ -910,7 +910,7 @@ def run_boa(
         work_dir = Path(context.get("work_dir", str(_repo_root / "work/boa"))) if context else (_repo_root / "work/boa")
 
     # Lazy import to avoid circular dependency with monica_integration
-    from token_optimiser.monica_integration import optimise
+    from .monica_integration import optimise
 
     # 0. ITIL classification (always run — cheap)
     itil_classification = classify_itil(question)
