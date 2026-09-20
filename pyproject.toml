@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neo-light-core"
+version = "0.1.0"
+description = "Shared token optimiser core for neo-light forks"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = ["pyyaml", "fastapi", "uvicorn", "pydantic"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["token_optimiser*"]

@@ -234,6 +234,13 @@ class TokenOptimiserConfig:
 
 config = TokenOptimiserConfig()
 
+# Load user overrides if present (in user repo, not in core)
+try:
+    from .config_user import config as user_config
+    config = user_config
+except ImportError:
+    pass  # Use defaults
+
 
 def _ts() -> str:
     return config._ts()
