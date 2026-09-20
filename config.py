@@ -235,6 +235,10 @@ class TokenOptimiserConfig:
 config = TokenOptimiserConfig()
 
 # Load user overrides if present (in user repo, not in core)
+import os as _os
+_current_dir = _os.path.dirname(_os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
 try:
     from config_user import config as user_config
     config = user_config
