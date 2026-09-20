@@ -38,6 +38,7 @@ class TokenOptimiserConfig:
         "infrastructure": "nvidia/nemotron-3-super-120b-a12b:free",
         "simple_transform": "nvidia/nemotron-3-super-120b-a12b:free",
         "architecture": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "privacy": "local-only",
     })
 
     tier_backends: dict = field(default_factory=lambda: {
@@ -144,7 +145,23 @@ class TokenOptimiserConfig:
     })
 
     security_confidence_cap: int = 55
-    category_confidence_caps: dict = field(default_factory=lambda: {"security": 55})
+    category_confidence_caps: dict = field(default_factory=lambda: {
+        "security": 55,
+        "architecture": 65,
+        "privacy": 55,
+    })
+
+    # Privacy/offline keywords that ALWAYS force T1 routing regardless of free_tier_priority.
+    # When privacy_force_t1 is True and any of these keywords appear in the task,
+    # the router short-circuits to T1 (local, air-gapped, never leaves the machine).
+    privacy_offline_keywords: list = field(default_factory=lambda: [
+        "offline", "airgap", "air-gapped", "air gapped", "no internet",
+        "local only", "on-premise", "on premise", "must stay local",
+        "data residency", "sovereign", "leave this machine", "never leave",
+        "stay on device", "no cloud", "without internet",
+    ])
+
+    privacy_force_t1: bool = True
     threshold_t1_min: int = 80
     threshold_t2_min: int = 60
     threshold_t3_always_below: int = 60
@@ -158,6 +175,10 @@ class TokenOptimiserConfig:
         "medium": "medium", "m": "medium", "med": "medium",
         "large": "large", "l": "large", "lg": "large",
     })
+
+    # Learning log calibration
+    calibration_enabled: bool = True
+    calibration_min_samples: int = 5
 
     # Parallelization scoring
     parallelize_threshold: float = 0.7
@@ -183,6 +204,8 @@ class TokenOptimiserConfig:
             "ambiguous_task_asks_human": self.ambiguous_task_asks_human,
             "security_confidence_cap": self.security_confidence_cap,
             "category_confidence_caps": self.category_confidence_caps or {},
+            "privacy_offline_keywords": self.privacy_offline_keywords,
+            "privacy_force_t1": self.privacy_force_t1,
             "scope_word_thresholds": self.scope_word_thresholds,
             "scope_prefix_pattern": self.scope_prefix_pattern,
             "scope_prefix_values": self.scope_prefix_values,

@@ -131,7 +131,6 @@ CATEGORY_RULES = [
             "encrypt", "decrypt", "hash", "vulnerability", "exploit",
             "injection", "sql injection", "xss", "csrf", "audit",
             "penetration", "security review", "security audit",
-            "permissions", "access control", "roles",
         ],
         "base_confidence": 30,
         "scope_modifiers": {
@@ -142,15 +141,33 @@ CATEGORY_RULES = [
         "cap_confidence": 55,
     },
     {
+        "name": "privacy",
+        "description": "Privacy, offline, air-gapped, data-residency, sensitive",
+        "keywords": [
+            "private", "privacy", "offline", "local-only", "sensitive",
+            "gdpr", "hipaa", "phi", "pii", "personal data", "confidential",
+            "internal only", "on-prem", "air-gapped", "no internet",
+            "disconnected", "local only", "must stay local", "data residency",
+            "sovereign", "on-device", "edge", "airgap",
+        ],
+        "base_confidence": 25,
+        "scope_modifiers": {
+            "small": 5,
+            "medium": 0,
+            "large": -5,
+        },
+        "cap_confidence": 55,
+        "force_tier": "T1",
+    },
+    {
         "name": "architecture",
-        "description": "Architecture, design, system decisions",
         "keywords": [
             "architecture", "design", "system design", "architect",
             "pattern", "architectural", "structure", "layout",
             "component", "module design", "api design", "interface design",
             "schema design", "database design", "data model",
         ],
-        "base_confidence": 45,
+        "base_confidence": 55,
         "scope_modifiers": {
             "small": 10,
             "medium": 0,
@@ -355,6 +372,7 @@ class TokenRouter:
             except ImportError:
                 self.enabled = True
         self._last_matches: list = []
+        self._last_task_text: str = ""  # stored for _select_tier privacy keyword check
 
     def assess(self, task: str, context: Optional[dict] = None) -> "RoutingDecision":
         """
@@ -368,6 +386,8 @@ class TokenRouter:
                 task=task,
                 context=context or {},
             )
+
+        self._last_task_text = task  # stored for _select_tier privacy keyword check
 
         words = len(task.split())
         lines_hint = context.get("estimated_lines", None) if context else None
@@ -531,6 +551,24 @@ class TokenRouter:
         if config.ask_human_band and config.threshold_t2_min <= confidence < config.threshold_t1_min:
             return "ASK"
 
+        # ── PRIVACY / OFFLINE SHORT-CIRCUIT ─────────────────────────────────────
+        # If privacy_force_t1 is enabled, check task text for privacy/offline keywords.
+        # These ALWAYS route to T1 regardless of free_tier_priority — data never leaves.
+        if config.privacy_force_t1 and matches:
+            top_match = matches[0]
+            if top_match.get("force_tier") == "T1" or top_match["name"] == "privacy":
+                return "T1"
+            # Also check raw keyword match from config.privacy_offline_keywords
+            task_lower = self._last_task_text.lower() if hasattr(self, '_last_task_text') else ""
+            if any(kw in task_lower for kw in config.privacy_offline_keywords):
+                return "T1"
+
+        # ── ARCHITECTURE MINIMUM TIER ───────────────────────────────────────────
+        # Architecture decisions need T2 minimum (free cloud is stronger than local 3B)
+        arch_min_tier = None
+        if matches and matches[0]["name"] == "architecture":
+            arch_min_tier = "T2"
+
         # ── FREE TIER PRIORITY ──────────────────────────────────────────────────
         # When free_tier_priority is True and the task is NOT security,
         # route to T2 (free cloud) instead of T1 (local 3B).
@@ -542,17 +580,27 @@ class TokenRouter:
             # Check if this is a security task — security always goes to T3
             if matches and matches[0]["name"] == "security":
                 return "T3"
-            # Route to free cloud (T2) instead of local (T1)
-            return "T2"
+            tier = "T2"
+            # Enforce minimum tier if set (e.g., architecture needs T2+)
+            if arch_min_tier and _TIER_ORDER.get(tier, 0) < _TIER_ORDER.get(arch_min_tier, 0):
+                tier = arch_min_tier
+            return tier
 
         # Standard routing (when free_tier_priority is False)
         if confidence >= config.threshold_t1_min:
-            return "T1"
+            tier = "T1"
+            if arch_min_tier and _TIER_ORDER.get(tier, 0) < _TIER_ORDER.get(arch_min_tier, 0):
+                tier = arch_min_tier
+            return tier
 
         if confidence >= config.threshold_t2_min:
             if not config.hybrid_band_enabled:
                 return "ASK"
             return "T2"
+
+        # Enforce minimum tier even at T3 (e.g., architecture needs T2+)
+        if arch_min_tier and _TIER_ORDER.get("T3", 0) < _TIER_ORDER.get(arch_min_tier, 0):
+            return arch_min_tier
 
         return "T3"
 
@@ -698,3 +746,27 @@ class LearningLog:
                 except json.JSONDecodeError:
                     continue
         return entries[-limit:]
+
+    def get_entries(self) -> list:
+        """Return ALL entries from the learning log (no limit)."""
+        try:
+            with open(self.path, "r") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            return []
+        entries = []
+        for line in lines:
+            if line.strip():
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return entries
+
+    def clear(self):
+        """Clear all entries from the learning log."""
+        try:
+            with open(self.path, "w") as f:
+                pass
+        except FileNotFoundError:
+            pass

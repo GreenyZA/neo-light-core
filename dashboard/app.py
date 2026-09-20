@@ -286,7 +286,8 @@ def log_stats():
     for e in entries:
         tier = e.get("tier", "unknown")
         by_tier[tier] = by_tier.get(tier, 0) + 1
-        ot = e.get("outcome_type", "unknown")
+        # outcome_type is nested under "outcome" dict
+        ot = e.get("outcome", {}).get("outcome_type", "unknown")
         by_outcome[ot] = by_outcome.get(ot, 0) + 1
 
     return api_ok({
@@ -459,7 +460,8 @@ def analytics_overview():
         conf = e.get("confidence", 50)
         if isinstance(conf, (int, float)):
             confidence_scores.append(conf)
-        ot = e.get("outcome_type", "unknown")
+        # outcome_type is nested under "outcome" dict
+        ot = e.get("outcome", {}).get("outcome_type", "unknown")
         outcome_types[ot] = outcome_types.get(ot, 0) + 1
 
     avg_conf = (
@@ -481,7 +483,7 @@ def analytics_overview():
     t1_total = tier_counts.get("T1", 0)
     for e in entries:
         if e.get("tier") == "T1":
-            if e.get("outcome_type") == "worked":
+            if e.get("outcome", {}).get("outcome_type") == "worked":
                 t1_success += 1
 
     t1_success_rate = (t1_success / t1_total * 100) if t1_total > 0 else 0
@@ -638,7 +640,8 @@ def analytics_effectiveness():
         if tier not in by_tier:
             by_tier[tier] = {"total": 0, "worked": 0, "partial": 0, "failed": 0}
         by_tier[tier]["total"] += 1
-        outcome = e.get("outcome_type", "unknown")
+        # outcome_type is nested under "outcome" dict
+        outcome = e.get("outcome", {}).get("outcome_type", "unknown")
         if outcome == "worked":
             by_tier[tier]["worked"] += 1
         elif outcome == "partial":

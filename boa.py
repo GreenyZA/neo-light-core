@@ -31,6 +31,7 @@ if str(_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PACKAGE_ROOT))
 
 from token_optimiser.monica_integration import optimise
+from token_optimiser.mock_backends import T1MockBackend, T1PrivacyBackend, T2MockBackend, T3MockBackend
 
 # ── Seat definitions ──────────────────────────────────────────────────────────
 
@@ -123,6 +124,7 @@ ITIL_CHANGE_KEYWORDS = [
     "update config", "alter configuration", "roll out", "rollback",
     "release", "migration", "upgrade", "version bump", "chg",
     "change request", "implement change", "push to prod", "production push",
+    "routing config", "change routing", "config update",
 ]
 
 # ITIL request keywords — new additions, feature requests, catalog items
@@ -381,7 +383,8 @@ def validate_swarm_plan(question: str) -> Dict[str, Any]:
         "swarm", "delegate_task", "multi-agent", "multi agent",
         "parallel workers", "orchestrate", "spawn workers",
         "worker count", "how many workers", "swarm plan",
-        "delegate", "agents",
+        "delegate", "agents", "workers", "files",
+        "parallel tasks", "parallelize",
     ]
 
     if not any(kw in q for kw in swarm_keywords):
@@ -579,7 +582,8 @@ def _generate_seat_answer(seat: Dict[str, str], question: str, tier: str) -> Dic
     Generate a single seat's answer.
 
     In mock mode (default), returns a structured placeholder based on the seat's
-    persona and the routed tier. In live mode, would call the appropriate backend.
+    persona and the routed tier. In live mode, calls the appropriate T1/T2/T3
+    mock backend from mock_backends.py.
     """
     backend = _resolve_backend()
     prompt = seat["framing"] + question
@@ -598,15 +602,35 @@ def _generate_seat_answer(seat: Dict[str, str], question: str, tier: str) -> Dic
             "backend": "mock",
         }
 
-    # Live mode: would dispatch to the tier-appropriate backend.
+    # Live mode: dispatch to the tier-appropriate backend.
+    backend_map = {
+        "T1": T1PrivacyBackend,
+        "T2": T2MockBackend,
+        "T3": T3MockBackend,
+    }
+    backend_cls = backend_map.get(tier, T2MockBackend)
+    try:
+        result = backend_cls().generate(prompt, seat_id=seat["id"])
+        answer = result.get("response", "")
+        model = result.get("model", "unknown")
+        quality = result.get("quality", "unknown")
+    except Exception as e:
+        # Graceful fallback to mock if backend fails
+        answer = (
+            f"[{seat['name']} — {tier} live] Backend error ({e}), "
+            f"falling back to mock. Response for: {question[:80]}..."
+        )
+        model = "fallback"
+        quality = "fallback"
+
     return {
         "seat_id": seat["id"],
         "seat_name": seat["name"],
         "tier": tier,
         "prompt_preview": prompt[:120],
-        "answer": (
-            f"[{seat['name']} — {tier} live] Response for: {question[:80]}..."
-        ),
+        "answer": answer,
+        "model": model,
+        "quality": quality,
         "simulated": False,
         "backend": backend,
     }
@@ -616,6 +640,22 @@ def _generate_seat_answer(seat: Dict[str, str], question: str, tier: str) -> Dic
 # Synthesis
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _extract_key_points(answer: str, max_chars: int = 120) -> List[str]:
+    """Extract key recommendation sentences from a seat answer."""
+    # Strip the [TX SIMULATED] prefix and extract first substantive sentence
+    cleaned = re.sub(r"^\[T[123] SIMULATED\]\s*", "", answer)
+    cleaned = re.sub(r"^.*?:\s*", "", cleaned, count=1)
+
+    # Split into sentences, keep the most substantive ones
+    sentences = re.split(r"[.!?]\s+", cleaned)
+    points = []
+    for sent in sentences[:3]:
+        sent = sent.strip()
+        if len(sent) > 20:
+            points.append(sent[:max_chars].rstrip() + ("..." if len(sent) > max_chars else ""))
+    return points[:2]  # max 2 key points per seat
+
+
 def _synthesise(
     seat_answers: List[Dict[str, str]],
     tier: str,
@@ -624,12 +664,46 @@ def _synthesise(
     tos_probe: Optional[Dict[str, Any]] = None,
     swarm_governance: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Produce a single synthesis paragraph from all seat answers."""
+    """Produce a single synthesis paragraph from actual seat answers.
+
+    Extracts key points from each seat's answer and aggregates them
+    into a coherent board-level recommendation.
+    """
     seat_names = ", ".join(a["seat_name"] for a in seat_answers)
+
+    # Extract key points from each seat's answer
+    seat_points: Dict[str, List[str]] = {}
+    for ans in seat_answers:
+        key = ans["seat_name"]
+        seat_points[key] = _extract_key_points(ans.get("answer", ""))
+
+    # Build synthesis body from actual answers
+    recommendation_lines = []
+    for seat_name, points in seat_points.items():
+        if points:
+            recommendation_lines.append(f"{seat_name}: {points[0]}")
+        else:
+            recommendation_lines.append(f"{seat_name}: [no substantive answer]")
+
+    # Aggregate unique themes
+    all_points = " ".join(" ".join(pts) for pts in seat_points.values()).lower()
+    themes = []
+    if any(kw in all_points for kw in ["security", "auth", "encrypt"]):
+        themes.append("security-critical")
+    if any(kw in all_points for kw in ["refactor", "rewrite", "migrate", "architecture"]):
+        themes.append("structural change")
+    if any(kw in all_points for kw in ["implement", "code", "build", "deploy"]):
+        themes.append("implementation task")
+    if any(kw in all_points for kw in ["review", "risk", "edge case", "failure"]):
+        themes.append("risk-aware")
+    if any(kw in all_points for kw in ["cost", "budget", "cheap", "free", "token"]):
+        themes.append("cost-sensitive")
+
+    theme_str = f" | Themes: {', '.join(themes)}" if themes else ""
 
     parts = [
         f"Synthesis ({len(seat_answers)} seats: {seat_names}) | "
-        f"Tier: {tier} | Confidence: {confidence}%"
+        f"Tier: {tier} | Confidence: {confidence}%{theme_str}"
     ]
 
     if itil_classification and itil_classification.get("is_ops"):
@@ -648,12 +722,10 @@ def _synthesise(
             f"Swarm governance: {'PASS' if swarm_governance.get('governance_pass') else 'REJECTED'}"
         )
 
-    parts.append(
-        "Consensus reflects board-level review across architecture, engineering, "
-        "research, review, budget, and executive perspectives."
-    )
+    parts.append("Board recommendations:")
+    parts.extend(f"  — {line}" for line in recommendation_lines)
 
-    return " | ".join(parts)
+    return "\n".join(parts)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -895,11 +967,17 @@ def _cli() -> None:
         print("")
         print("Built-in tests:")
         print("   python -m token_optimiser.boa --test-itil")
+        print("   python -m token_optimiser.boa --test-boa")
+        print("   BOA_BACKEND=live python -m token_optimiser.boa --test-boa")
         sys.exit(1)
 
     # Test mode
     if sys.argv[1] == "--test-itil":
         _test_itil_classification()
+        return
+
+    if sys.argv[1] == "--test-boa":
+        _test_boa_session()
         return
 
     question = " ".join(sys.argv[1:])
@@ -949,6 +1027,79 @@ def _cli() -> None:
     for ans in result["seat_answers"]:
         print(f"  [{ans['seat_name']}] {ans['answer'][:80]}...")
     print(f"\nSynthesis:\n{result['synthesis']}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Built-in BOA test
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _test_boa_session() -> None:
+    """Run a full BOA session with a test question and print results."""
+    question = (
+        "We need to add JWT authentication to our microservice API. "
+        "What's the best approach for securing endpoints while keeping "
+        "token costs low?"
+    )
+
+    backend = _resolve_backend()
+    print(f"BOA Integration Test")
+    print(f"{'='*60}")
+    print(f"Backend: {backend} (set BOA_BACKEND=live to test backends)")
+    print(f"Question: {question}")
+    print()
+
+    result = run_boa(question)
+
+    print(f"\n{'='*60}")
+    print(f"RESULTS")
+    print(f"{'='*60}")
+    print(f"Tier:       {result['tier']}")
+    print(f"Confidence: {result['confidence']}%")
+    print(f"Log:        {result['log_path']}")
+
+    # ITIL output
+    itil = result.get("itil_classification")
+    if itil and itil.get("is_ops"):
+        print(f"\n📋 ITIL: {itil['classification'].upper()} (conf: {itil['confidence']:.0%})")
+
+    # TOS output
+    tos = result.get("tos_probe")
+    if tos and tos.get("probed"):
+        print(f"🔍 TOS: {len(tos.get('recommended', []))} recommendations")
+
+    # Swarm output
+    swarm = result.get("swarm_governance")
+    if swarm and swarm.get("governed"):
+        status = "PASS" if swarm.get("governance_pass") else "REJECTED"
+        print(f"🐝 Swarm: {status}")
+
+    print(f"\nSeat Answers ({len(result['seat_answers'])}):")
+    for ans in result["seat_answers"]:
+        simulated = ans.get("simulated", True)
+        backend_name = ans.get("backend", "?")
+        quality = ans.get("quality", "?")
+        tag = "SIM" if simulated else "LIVE"
+        print(f"  [{ans['seat_name']:20s}] {tag:4s} q={quality:12s} b={backend_name}: {ans['answer'][:70]}...")
+
+    print(f"\n{'─'*60}")
+    print(f"Synthesis:\n{result['synthesis']}")
+    print(f"{'─'*60}")
+
+    # Verify integration
+    errors = []
+    for ans in result["seat_answers"]:
+        if backend == "live" and ans.get("simulated"):
+            errors.append(f"  {ans['seat_name']}: expected live answer, got simulated")
+        if backend == "live" and ans.get("backend") == "mock":
+            errors.append(f"  {ans['seat_name']}: backend tag is 'mock' in live mode")
+
+    if errors:
+        print(f"\n❌ Integration errors:")
+        for e in errors:
+            print(e)
+        sys.exit(1)
+    else:
+        print(f"\n✅ Integration OK — all seats returned expected backend type ({backend})")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

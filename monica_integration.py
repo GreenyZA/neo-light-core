@@ -14,6 +14,38 @@ from typing import Optional, Dict, Any, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from token_optimiser.router import LearningLog
+
+
+def calibrate_confidence(category: str, base_confidence: int) -> int:
+    """
+    Adjust confidence based on learning log outcomes for the given category.
+
+    Reads learning log entries for the category. If >5 entries with outcomes
+    exist and success rate < 50%, reduce by 10. If >80%, increase by 5.
+    Result is capped at 0-99.
+    """
+    if not category:
+        return base_confidence
+    log = LearningLog()
+    entries = log.get_recent(1000)  # get all recent entries (up to 1000)
+    category_entries = [
+        e for e in entries
+        if category in e.get("matched_categories", []) and "outcome" in e
+    ]
+    if len(category_entries) <= 5:
+        return base_confidence
+    successes = sum(
+        1 for e in category_entries
+        if e["outcome"].get("outcome_type") == "worked"
+    )
+    success_rate = successes / len(category_entries)
+    if success_rate < 0.5:
+        base_confidence -= 10
+    elif success_rate > 0.8:
+        base_confidence += 5
+    return max(0, min(99, base_confidence))
+
 
 def optimise(task: str, context: Optional[dict] = None) -> Dict[str, Any]:
     """
@@ -25,13 +57,40 @@ def optimise(task: str, context: Optional[dict] = None) -> Dict[str, Any]:
     result = decision.to_dict()
     result["parallelize"] = decision.parallelize
     result["parallelize_score"] = decision.parallelize_score
+
+    # Calibrate confidence based on learning log outcomes
+    category = result.get("matched_categories", [None])[0] if result.get("matched_categories") else None
+    if category:
+        calibrated = calibrate_confidence(category, result["confidence"])
+        result["confidence"] = calibrated
+        result["calibrated"] = calibrated != decision.confidence
+        if result["calibrated"]:
+            result["rationale"] += f" | Calibrated: {decision.confidence} → {calibrated} (category: {category})"
+
     return result
 
 
 def optimise_batch(tasks: List[str], context: Optional[dict] = None) -> List[Dict[str, Any]]:
     from token_optimiser.router import TokenRouter
     router = TokenRouter()
-    return [router.assess(task, context or {}).to_dict() for task in tasks]
+    results = []
+    for task in tasks:
+        decision = router.assess(task, context or {})
+        result = decision.to_dict()
+        result["parallelize"] = decision.parallelize
+        result["parallelize_score"] = decision.parallelize_score
+
+        # Calibrate confidence based on learning log outcomes
+        category = result.get("matched_categories", [None])[0] if result.get("matched_categories") else None
+        if category:
+            calibrated = calibrate_confidence(category, result["confidence"])
+            result["confidence"] = calibrated
+            result["calibrated"] = calibrated != decision.confidence
+            if result["calibrated"]:
+                result["rationale"] += f" | Calibrated: {decision.confidence} → {calibrated} (category: {category})"
+
+        results.append(result)
+    return results
 
 
 def optimiser_enabled() -> bool:
