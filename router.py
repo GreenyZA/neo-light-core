@@ -17,7 +17,7 @@ import re
 import json
 import datetime
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 # ── Tier definitions ──────────────────────────────────────────────────────────
 
@@ -230,6 +230,124 @@ PARALLELIZE_KEYWORDS = [
     " parallel ", " meanwhile ",
 ]
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ITIL Classification (moved from boa.py for router-driven governance)
+# BOA/ITIL now drives tier and swarm decisions in assess()
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ITIL incident keywords — service disruption, degradation, failures
+ITIL_INCIDENT_KEYWORDS = [
+    "down", "outage", "failure", "failed", "broken", "error", "crash", "stale",
+    "unavailable", "unreachable", "timeout", "timing out", "502", "503", "504",
+    "hops stale", "stale hop", "not responding", "service down", "dead",
+    "failing", "degradation", "degraded", "latency spike", "slow",
+    "connection refused", "refusing connections", "refused",
+]
+
+# ITIL problem keywords — root cause, recurring issues, known errors
+ITIL_PROBLEM_KEYWORDS = [
+    "root cause", "recurring", "keeps happening", "repeatedly", "known error",
+    "systemic", "pattern of failures", "chronic", "intermittent",
+    "investigate why", "why does this keep", "post-mortem", "postmortem",
+    "rca", "5 whys", "trend analysis",
+]
+
+# ITIL change keywords — planned modifications, deployments
+ITIL_CHANGE_KEYWORDS = [
+    "change", "deploy", "deployment", "modify", "modify config", "config change",
+    "update config", "alter configuration", "roll out", "rollback",
+    "release", "migration", "upgrade", "version bump", "chg",
+    "change request", "implement change", "push to prod", "production push",
+    "routing config", "change routing", "config update",
+]
+
+# ITIL request keywords — new additions, feature requests, catalog items
+ITIL_REQUEST_KEYWORDS = [
+    "new model", "add model", "available", "feature request", "request for",
+    "new tool", "integrate", "onboard", "provision", "catalog",
+    "request access", "new gateway", "new provider", "new free",
+    "new models available", "can we add", "should we add",
+]
+
+# ITIL event keywords — alerts, notifications, informational
+ITIL_EVENT_KEYWORDS = [
+    "alert", "notification", "warn", "threshold", "monitor", "metric",
+    "log entry", "health check", "ping", "heartbeat", "sensor",
+    "informational", "status update", "scheduled maintenance",
+]
+
+# Ops detection — any of these categories trigger ITIL classification
+OPS_CATEGORIES = [
+    "incident", "problem", "change", "request", "event",
+]
+
+def classify_itil(question: str) -> Dict[str, Any]:
+    """
+    Classify a question using ITIL taxonomy.
+
+    Returns a dict with:
+        - is_ops: bool — whether this is an ops-related question
+        - classification: str — incident/problem/change/request/event/unknown
+        - confidence: float — 0.0-1.0 classification confidence
+        - requires_chg_number: bool — Change-type requires CHG number
+        - prefix: str — INC-/PRB-/CHG-/REQ-/EVT- log prefix
+        - keywords_matched: list[str] — which keywords triggered classification
+    """
+    q = question.lower().strip()
+
+    scores: Dict[str, float] = {}
+    matched_keywords: Dict[str, List[str]] = {}
+
+    # Score each ITIL category
+    categories = {
+        "incident": ITIL_INCIDENT_KEYWORDS,
+        "problem": ITIL_PROBLEM_KEYWORDS,
+        "change": ITIL_CHANGE_KEYWORDS,
+        "request": ITIL_REQUEST_KEYWORDS,
+        "event": ITIL_EVENT_KEYWORDS,
+    }
+
+    for cat, keywords in categories.items():
+        hits = [kw for kw in keywords if kw in q]
+        matched_keywords[cat] = hits
+        # Score: number of hits, weighted by keyword specificity (longer = more specific)
+        score = sum(len(kw.split()) for kw in hits)
+        scores[cat] = float(score)
+
+    max_score = max(scores.values()) if scores else 0.0
+    total_score = sum(scores.values()) if scores else 0.0
+
+    if max_score == 0.0:
+        return {
+            "is_ops": False,
+            "classification": "unknown",
+            "confidence": 0.0,
+            "requires_chg_number": False,
+            "prefix": "",
+            "keywords_matched": [],
+        }
+
+    best_category = max(scores, key=scores.get)
+    confidence = max_score / (total_score + 1e-6) if total_score > 0 else 0.0
+    confidence = min(confidence, 1.0)
+
+    prefix_map = {
+        "incident": "INC",
+        "problem": "PRB",
+        "change": "CHG",
+        "request": "REQ",
+        "event": "EVT",
+    }
+
+    return {
+        "is_ops": True,
+        "classification": best_category,
+        "confidence": round(confidence, 3),
+        "requires_chg_number": best_category == "change",
+        "prefix": prefix_map.get(best_category, ""),
+        "keywords_matched": matched_keywords.get(best_category, []),
+    }
+
 # ── Orchestrator-aware routing ────────────────────────────────────────────────
 # Maps task patterns to minimum tier + recommended worker count + review needs.
 # Deterministic: pattern order is fixed; first match wins.
@@ -376,15 +494,22 @@ class TokenRouter:
 
     def assess(self, task: str, context: Optional[dict] = None) -> "RoutingDecision":
         """
-        Assess a task and return a RoutingDecision with tier, confidence, and rationale.
+        Assess a task and return a RoutingDecision with tier, confidence, rationale,
+        itil_classification (always), and swarm (with solo/pair/swarm/mega rec).
+        ITIL from boa.py logic now drives decisions. Free tier (T2) maximized
+        unless security/change forces T3. Non-trivial (>8 swarm score, medium+,
+        ops, ambiguous, low-conf) get swarm rec.
         """
         if not self.enabled:
+            itil = classify_itil(task)
             return RoutingDecision(
                 tier="T2",
                 confidence=50,
                 rationale="Token optimiser disabled — defaulting to T2",
                 task=task,
                 context=context or {},
+                itil_classification=itil,
+                swarm={"recommendation": "solo", "non_trivial": False, "note": "disabled"},
             )
 
         self._last_task_text = task  # stored for _select_tier privacy keyword check
@@ -406,9 +531,12 @@ class TokenRouter:
                 confidence = min(confidence, cap)
                 break
 
-        # Select tier
+        # ITIL classification — always run (cheap, drives governance)
+        itil_classification = classify_itil(task)
+
+        # Select tier (now passes itil so change/security force T3, else free T2 aggressive)
         unique_categories = len(set(m["name"] for m in matches))
-        tier = self._select_tier(confidence, unique_categories, matches)
+        tier = self._select_tier(confidence, unique_categories, matches, itil_classification=itil_classification)
 
         rationale = self._build_rationale(matches, scope, confidence, tier, unique_categories)
 
@@ -419,6 +547,23 @@ class TokenRouter:
         if parallelize:
             rationale += " | HIGH PARALLELIZATION: Consider using `delegate_task` to distribute across workers."
 
+        # Compute swarm recommendation (swarm-decision dims, >8 = non-trivial)
+        # Biased to T2 free usage
+        swarm = self._compute_swarm_recommendation(task, scope, itil_classification, matches, confidence)
+
+        # If non-trivial and not forced T3, aggressively use T2 for the main task too
+        if swarm.get("non_trivial") and tier not in ("T3", "ASK") and config.free_tier_priority:
+            if not (itil_classification.get("classification") == "change" or
+                    (matches and any(m.get("name") == "security" for m in matches))):
+                tier = "T2"
+                rationale += " | ITIL+swarm non-trivial: forced T2 (free tier max)"
+
+        if swarm.get("non_trivial"):
+            rationale += f" | SWARM: {swarm['recommendation']} (score={swarm['score']}, workers->{swarm.get('tier_for_workers')})"
+
+        if itil_classification.get("is_ops"):
+            rationale += f" | ITIL: {itil_classification['classification']} (conf={itil_classification['confidence']})"
+
         return RoutingDecision(
             tier=tier,
             confidence=confidence,
@@ -428,6 +573,8 @@ class TokenRouter:
             matched_categories=[m["name"] for m in matches],
             parallelize=parallelize,
             parallelize_score=parallelize_score,
+            itil_classification=itil_classification,
+            swarm=swarm,
         )
 
     def _compute_parallelize_score(self, task: str) -> float:
@@ -477,6 +624,153 @@ class TokenRouter:
 
         # Clamp to [0.0, 1.0]
         return round(min(max(combined, 0.0), 1.0), 3)
+
+    def _estimate_file_count(self, task: str) -> int:
+        """Estimate number of files touched from task text (for swarm scoring)."""
+        task_lower = task.lower()
+        file_patterns = [
+            r'[\w./\-_]+\.(py|js|ts|jsx|tsx|go|rs|java|rb|cpp|c|h|hpp|cs|php|swift|kt|scala|sh|bash|zsh|fish|ps1|bat|cmd|yaml|yml|json|toml|xml|html|css|scss|less|md|txt|rst|ini|cfg|env|lock|sql|db|sqlite|csv|tsv|log)',
+            r'(?:^|[\s,;])([\w./\-_]{3,}(?:/[\w.\-_]+)+)',
+        ]
+        file_paths = set()
+        for pat in file_patterns:
+            for m in re.finditer(pat, task_lower):
+                path = m.group(1) if m.lastindex else m.group(0)
+                if path and len(path) > 2:
+                    file_paths.add(path)
+        return max(1, len(file_paths))
+
+    def _estimate_module_count(self, task: str) -> int:
+        """Estimate modules/crates from keywords and path segments."""
+        task_lower = task.lower()
+        module_keywords = ["module", "package", "crate", "library", "subsystem", "component", "service"]
+        kw_count = sum(1 for kw in module_keywords if kw in task_lower)
+        # count unique top-level dirs in paths
+        dir_matches = re.findall(r'([a-z_][a-z0-9_]*)/', task_lower)
+        dirs = set(d for d in dir_matches if len(d) > 1)
+        return max(1, kw_count + len(dirs))
+
+    def _estimate_sequential_calls(self, task: str) -> int:
+        """Rough count of sequential steps from language in task."""
+        task_lower = task.lower()
+        seq_indicators = ["then ", "after ", "next ", "followed by", "step ", "sequence", "first ", "second ", "third "]
+        count = sum(task_lower.count(ind) for ind in seq_indicators)
+        # numbered steps
+        numbered = len(re.findall(r'\b\d+[\.\)]\s', task_lower))
+        return max(1, count + numbered)
+
+    def _compute_swarm_recommendation(self, task: str, scope: str, itil_classification: Optional[dict], matches: list, confidence: int) -> dict:
+        """
+        Compute swarm recommendation (solo/pair/swarm/mega) using swarm-decision dimensions.
+        Non-trivial = score >8 .
+        Strongly biases toward T2 free tier usage for workers unless security/change forces T3.
+        """
+        from token_optimiser.config import config
+
+        file_count = self._estimate_file_count(task)
+        module_count = self._estimate_module_count(task)
+        seq_count = self._estimate_sequential_calls(task)
+
+        # map to 1-5 scores per swarm-decision skill
+        def dim_score_files(n: int) -> int:
+            if n <= 1: return 1
+            if n <= 3: return 2
+            if n <= 5: return 3
+            if n <= 8: return 4
+            return 5
+
+        def dim_score_modules(n: int) -> int:
+            if n <= 1: return 1
+            if n <= 2: return 2
+            if n <= 3: return 3
+            if n <= 5: return 4
+            return 5
+
+        def dim_score_seq(n: int) -> int:
+            if n < 5: return 1
+            if n < 10: return 2
+            if n < 20: return 3
+            if n < 40: return 4
+            return 5
+
+        files_s = dim_score_files(file_count)
+        mods_s = dim_score_modules(module_count)
+        seq_s = dim_score_seq(seq_count)
+
+        # cross-cutting: multiple cats, arch, research, infra
+        cross = 1
+        if len(matches) > 2:
+            cross = 4
+        elif any(m["name"] in ("architecture", "infrastructure", "research") for m in matches):
+            cross = 3
+        elif len(matches) > 1:
+            cross = 2
+
+        # test/verify: if mentions tests or large scope
+        test_c = 1
+        task_l = task.lower()
+        if "test" in task_l or "verify" in task_l or "coverage" in task_l:
+            test_c = 4 if scope == "large" else 3
+        elif scope == "large":
+            test_c = 3
+        elif scope == "medium":
+            test_c = 2
+
+        total_score = files_s + mods_s + seq_s + cross + test_c
+
+        if total_score <= 8:
+            rec = "solo"
+        elif total_score <= 12:
+            rec = "pair"
+        elif total_score <= 18:
+            rec = "swarm"
+        else:
+            rec = "mega"
+
+        is_non_trivial = total_score > 8
+
+        # ITIL ops or ambiguous/low conf also non-trivial
+        is_ops = bool(itil_classification and itil_classification.get("is_ops"))
+        unique_cats = len(set(m["name"] for m in matches)) if matches else 0
+        low_conf = confidence < config.threshold_t2_min
+        ambiguous = unique_cats >= 3
+        if is_ops or ambiguous or low_conf or scope in ("medium", "large"):
+            is_non_trivial = True
+            if rec == "solo":
+                rec = "pair" if total_score <= 10 else "swarm"
+
+        # Stronger bias for user's goal: auto-swarm on refactor/integration/packaging/docs work
+        # (so user no longer has to manually request swarms)
+        task_l = task.lower()
+        auto_swarm_triggers = ["refactor", "integration", "packaging", "github", "release", "multiple files", "update several", "docs and", "engine", "add boa", "governance"]
+        if any(t in task_l for t in auto_swarm_triggers) and rec in ("solo", "pair"):
+            rec = "swarm"
+            is_non_trivial = True
+
+        # bias: for free tier max, use T2 workers; only T3 if forced
+        forced_t3 = False
+        if itil_classification and itil_classification.get("classification") == "change":
+            forced_t3 = True
+        if matches and any(m.get("name") == "security" for m in matches):
+            forced_t3 = True
+
+        tier_for_workers = "T3" if forced_t3 else "T2"
+
+        return {
+            "recommendation": rec,
+            "score": total_score,
+            "dimensions": {
+                "files_touched": files_s,
+                "modules": mods_s,
+                "sequential_tool_calls": seq_s,
+                "cross_cutting": cross,
+                "test_verify": test_c,
+            },
+            "non_trivial": is_non_trivial,
+            "itil_driven": is_ops,
+            "tier_for_workers": tier_for_workers,
+            "rationale": f"score={total_score} (>8 non-trivial) → {rec}; workers on {tier_for_workers} (free max unless change/security)",
+        }
 
     def _determine_scope(self, words: int, lines_hint: Optional[int], task_text: str = "") -> str:
         """Determine task scope: small, medium, or large."""
@@ -539,9 +833,21 @@ class TokenRouter:
 
         return int(round(weighted_conf))
 
-    def _select_tier(self, confidence: int, unique_categories: int = 0, matches: list = None) -> str:
-        """Select tier based on confidence score and config thresholds."""
+    def _select_tier(self, confidence: int, unique_categories: int = 0, matches: list = None, itil_classification: Optional[dict] = None) -> str:
+        """Select tier based on confidence score and config thresholds.
+        Now driven by ITIL/BOA governance: prioritize free (T2) aggressively unless
+        security or change classification forces T3.
+        """
         from token_optimiser.config import config
+
+        # ── ITIL / BOA GOVERNANCE OVERRIDE FIRST (forces T3 for change/security even on ambiguous) ─
+        if itil_classification and itil_classification.get("is_ops"):
+            cls = itil_classification.get("classification")
+            if cls == "change":
+                return "T3"
+            if matches and any(m.get("name") == "security" for m in matches):
+                return "T3"
+            # incident/problem/request/event: stay on free path (aggressive T2)
 
         # Ambiguous task check
         if config.ambiguous_task_asks_human and unique_categories >= 3:
@@ -572,10 +878,8 @@ class TokenRouter:
         # ── FREE TIER PRIORITY ──────────────────────────────────────────────────
         # When free_tier_priority is True and the task is NOT security,
         # route to T2 (free cloud) instead of T1 (local 3B).
-        # The free cloud models (Nemotron 3 Ultra, DeepSeek V4 Flash, Laguna S 2.1)
-        # are FAR superior to the local 3B model for most tasks.
-        # T1 is only used for: privacy-sensitive tasks, offline mode, or when
-        # free cloud is unavailable.
+        # The free cloud models ... are FAR superior ...
+        # Prioritize free tiers aggressively unless security/change forces T3.
         if config.free_tier_priority and confidence >= config.threshold_t2_min:
             # Check if this is a security task — security always goes to T3
             if matches and matches[0]["name"] == "security":
@@ -664,6 +968,8 @@ class RoutingDecision:
     parallelize: bool = False
     parallelize_score: float = 0.0
     orchestrator_hints: Optional[dict] = None
+    itil_classification: Optional[dict] = None
+    swarm: Optional[dict] = None
 
     def to_dict(self) -> dict:
         d = {
@@ -680,6 +986,12 @@ class RoutingDecision:
         }
         if self.orchestrator_hints is not None:
             d["orchestrator_hints"] = self.orchestrator_hints
+        if self.itil_classification is not None:
+            d["itil_classification"] = self.itil_classification
+        if self.swarm is not None:
+            d["swarm"] = self.swarm
+            if isinstance(self.swarm, dict) and "recommendation" in self.swarm:
+                d["swarm_recommendation"] = self.swarm["recommendation"]
         return d
 
 

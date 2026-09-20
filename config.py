@@ -189,6 +189,12 @@ class TokenOptimiserConfig:
     min_orchestrator_tier: str = "T2"
     enforce_review: bool = True
 
+    # BOA/ITIL governance mode for monica_integration.optimise
+    # "off": never use BOA, pure router (backward compat, no overhead)
+    # "auto": use lightweight BOA (classify_itil + validate_swarm_plan) for non-trivial/ops tasks
+    # "force_boa": always attempt lightweight BOA governance for binding tier + swarm
+    governance_mode: str = "auto"
+
     def _ts(self) -> str:
         from datetime import datetime, timezone
         return datetime.now(timezone.utc).isoformat()
@@ -222,6 +228,7 @@ class TokenOptimiserConfig:
             "min_review_tier": self.min_review_tier,
             "min_orchestrator_tier": self.min_orchestrator_tier,
             "enforce_review": self.enforce_review,
+            "governance_mode": self.governance_mode,
         }
 
 

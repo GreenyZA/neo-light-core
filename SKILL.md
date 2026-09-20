@@ -1,7 +1,7 @@
 # Token Optimiser Skill
 
 **Name:** token-optimiser  
-**Description:** Budget-aware router T1 local → T2 free cloud → T3 paid. Plan first, confidence gate, learn after. Always loaded into Monica — intercepts agent calls and routes through the 3-tier budget system.
+**Description:** Budget-aware router T1 local → T2 free cloud → T3 paid. Plan first, confidence gate, learn after. Always loaded into Monica — intercepts agent calls and routes through the 3-tier budget system. Now integrated with BOA/ITIL for governed tier selection and automatic swarming on non-trivial work.
 
 **Invoke:** Automatic on every non-trivial agent call. Explicit: `/token-optimiser` or "route this with token optimiser".
 
@@ -50,11 +50,13 @@ Receive task. Always produce short Socratic plan + Token Budget Plan before mult
 The token-optimiser is loaded as an **always-on pre-routing layer**. When Monica receives a request:
 
 1. Token-optimiser intercepts the task description
-2. Runs confidence assessment (keyword matching + scope analysis)
-3. Produces a Token Budget Plan
-4. Routes to the selected tier (T1/T2/T3)
-5. The appropriate Worker(s) execute on that tier's backend
+2. Runs confidence assessment (keyword matching + scope analysis) + parallelize_score (files, keywords, length) for automatic swarming
+3. Produces a Token Budget Plan + orchestrator hints (min tier for review/orchestrate)
+4. Routes to the selected tier (T1/T2/T3); for BOA queries also ITIL classify first then TOS
+5. The appropriate Worker(s) execute on that tier's backend (or delegate swarm if parallelize >= 0.7)
 6. After task completion, append Learning Log entry
+
+BOA/ITIL now govern: non-trivial + board queries go through classify_itil → optimise() → swarm validation to force free-tier + auto-swarm where possible.
 
 **Toggle:**
 - Enable: `token-optimiser.enable()`
@@ -67,6 +69,18 @@ The token-optimiser is loaded as an **always-on pre-routing layer**. When Monica
 - **board-of-advisors** — Token-optimiser occupies the "Budget" seat. Board launches sub-agents, votes on routing.
 - **stop-slop** — Run on marketing copy and user-facing docs during T2/T3 phases.
 - **caveman** — Ultra-short mode for tight iteration and cheap routing summaries.
+
+## BOA + ITIL Governance (new)
+
+BOA + ITIL now control tier selection and swarm decisions for non-trivial work to maximize free tier.
+
+- BOA (6 seats including Budget/TOS) is triggered on `BOA` or auto for complex queries.
+- Always runs `classify_itil()` first for ops (incident/problem/change/request/event).
+- Then calls `optimise()` (this skill) for tier + confidence + `parallelize` flag.
+- `validate_swarm_plan()` checks thresholds: >3 files, >2 modules, >5 sequential tool calls → automatic swarming via `delegate_task`.
+- Governance logged to `work/boa/governance/` + full sessions.
+- Result: tier/swarm always prefer T1/T2 free where viable; only escalate on caps or ITIL requirements.
+- See `boa.py`: run_boa, classify_itil, validate_swarm_plan, probe_t2_gateways; `router.py` for parallelize_score + orchestrator_routing.
 
 ---
 

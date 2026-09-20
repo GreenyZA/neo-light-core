@@ -67,6 +67,12 @@ def optimise(task: str, context: Optional[dict] = None) -> Dict[str, Any]:
         if result["calibrated"]:
             result["rationale"] += f" | Calibrated: {decision.confidence} → {calibrated} (category: {category})"
 
+    # BOA/ITIL governance enrichment (new)
+    result["itil_classification"] = getattr(decision, "itil_classification", None) or result.get("itil_classification")
+    result["swarm_recommendation"] = getattr(decision, "swarm_recommendation", None) or result.get("swarm_recommendation")
+    result["governance_applied"] = bool(result.get("itil_classification") or result.get("swarm_recommendation"))
+    result["governance_mode"] = "auto"
+
     return result
 
 

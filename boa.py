@@ -9,12 +9,14 @@ and logs governance decisions to work/boa/governance/.
 Importable but optional — not required by the token_optimiser package.
 
 Usage:
-    from token_optimiser.boa import run_boa, classify_itil
+    from token_optimiser.boa import run_boa, classify_itil, decide_governance
     result = run_boa("What's the best way to handle auth in a microservice?")
+    gov = decide_governance("add JWT to microservice API")  # fast, for router
 
 Or CLI:
     python -m token_optimiser.boa "your question here"
     python token_optimiser/boa.py "your question here"
+    # CLI always uses full board (6 seats + synthesis); programmatic uses decide_governance for speed
 """
 
 import datetime
@@ -30,8 +32,11 @@ _PACKAGE_ROOT = Path(__file__).resolve().resolve().parent.parent
 if str(_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PACKAGE_ROOT))
 
-from token_optimiser.monica_integration import optimise
 from token_optimiser.mock_backends import T1MockBackend, T1PrivacyBackend, T2MockBackend, T3MockBackend
+from token_optimiser.router import classify_itil
+
+# monica_integration imported lazily inside run_boa to avoid circular imports
+# when monica_integration imports lightweight BOA classifiers for governance.
 
 # ── Seat definitions ──────────────────────────────────────────────────────────
 
@@ -97,124 +102,9 @@ SEATS: List[Dict[str, str]] = [
     },
 ]
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ITIL Classification
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ITIL incident keywords — service disruption, degradation, failures
-ITIL_INCIDENT_KEYWORDS = [
-    "down", "outage", "failure", "failed", "broken", "error", "crash", "stale",
-    "unavailable", "unreachable", "timeout", "timing out", "502", "503", "504",
-    "hops stale", "stale hop", "not responding", "service down", "dead",
-    "failing", "degradation", "degraded", "latency spike", "slow",
-    "connection refused", "refusing connections", "refused",
-]
-
-# ITIL problem keywords — root cause, recurring issues, known errors
-ITIL_PROBLEM_KEYWORDS = [
-    "root cause", "recurring", "keeps happening", "repeatedly", "known error",
-    "systemic", "pattern of failures", "chronic", "intermittent",
-    "investigate why", "why does this keep", "post-mortem", "postmortem",
-    "rca", "5 whys", "trend analysis",
-]
-
-# ITIL change keywords — planned modifications, deployments
-ITIL_CHANGE_KEYWORDS = [
-    "change", "deploy", "deployment", "modify", "modify config", "config change",
-    "update config", "alter configuration", "roll out", "rollback",
-    "release", "migration", "upgrade", "version bump", "chg",
-    "change request", "implement change", "push to prod", "production push",
-    "routing config", "change routing", "config update",
-]
-
-# ITIL request keywords — new additions, feature requests, catalog items
-ITIL_REQUEST_KEYWORDS = [
-    "new model", "add model", "available", "feature request", "request for",
-    "new tool", "integrate", "onboard", "provision", "catalog",
-    "request access", "new gateway", "new provider", "new free",
-    "new models available", "can we add", "should we add",
-]
-
-# ITIL event keywords — alerts, notifications, informational
-ITIL_EVENT_KEYWORDS = [
-    "alert", "notification", "warn", "threshold", "monitor", "metric",
-    "log entry", "health check", "ping", "heartbeat", "sensor",
-    "informational", "status update", "scheduled maintenance",
-]
-
-# Ops detection — any of these categories trigger ITIL classification
-OPS_CATEGORIES = [
-    "incident", "problem", "change", "request", "event",
-]
-
-
-def classify_itil(question: str) -> Dict[str, Any]:
-    """
-    Classify a question using ITIL taxonomy.
-
-    Returns a dict with:
-        - is_ops: bool — whether this is an ops-related question
-        - classification: str — incident/problem/change/request/event/unknown
-        - confidence: float — 0.0-1.0 classification confidence
-        - requires_chg_number: bool — Change-type requires CHG number
-        - prefix: str — INC-/PRB-/CHG-/REQ-/EVT- log prefix
-        - keywords_matched: list[str] — which keywords triggered classification
-    """
-    q = question.lower().strip()
-
-    scores: Dict[str, float] = {}
-    matched_keywords: Dict[str, List[str]] = {}
-
-    # Score each ITIL category
-    categories = {
-        "incident": ITIL_INCIDENT_KEYWORDS,
-        "problem": ITIL_PROBLEM_KEYWORDS,
-        "change": ITIL_CHANGE_KEYWORDS,
-        "request": ITIL_REQUEST_KEYWORDS,
-        "event": ITIL_EVENT_KEYWORDS,
-    }
-
-    for cat, keywords in categories.items():
-        hits = [kw for kw in keywords if kw in q]
-        matched_keywords[cat] = hits
-        # Score: number of hits, weighted by keyword specificity (longer = more specific)
-        score = sum(len(kw.split()) for kw in hits)
-        scores[cat] = float(score)
-
-    max_score = max(scores.values()) if scores else 0.0
-    total_score = sum(scores.values()) if scores else 0.0
-
-    if max_score == 0.0:
-        return {
-            "is_ops": False,
-            "classification": "unknown",
-            "confidence": 0.0,
-            "requires_chg_number": False,
-            "prefix": "",
-            "keywords_matched": [],
-        }
-
-    best_category = max(scores, key=scores.get)
-    confidence = max_score / (total_score + 1e-6) if total_score > 0 else 0.0
-    confidence = min(confidence, 1.0)
-
-    prefix_map = {
-        "incident": "INC",
-        "problem": "PRB",
-        "change": "CHG",
-        "request": "REQ",
-        "event": "EVT",
-    }
-
-    return {
-        "is_ops": True,
-        "classification": best_category,
-        "confidence": round(confidence, 3),
-        "requires_chg_number": best_category == "change",
-        "prefix": prefix_map.get(best_category, ""),
-        "keywords_matched": matched_keywords.get(best_category, []),
-    }
-
+# ITIL classification now lives in router.py (classify_itil) — router assess() always runs it.
+# Governance from BOA/ITIL drives tier + swarm_recommendation decisions.
+# (imported at module top)
 
 def _generate_incident_id() -> str:
     """Generate a compact incident/problem/change ID."""
@@ -499,6 +389,136 @@ def _swarm_recommendation(
         issues.append("no reviewer assigned — each worker needs a paired reviewer")
 
     return f"SWARM REJECTED: {'; '.join(issues)}. Fix before delegating."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Programmatic Governance API (for router / auto routing + swarming)
+# Lightweight, no full 6-seat synthesis. CLI/run_boa still does full board Q&A.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Reentry guard (module-level) to prevent infinite recursion when:
+#   router.assess -> boa.decide_governance -> optimise/monica -> router.assess
+# The guard short-circuits the inner decide call with safe defaults (T2, size=1).
+_BOA_REENTRY = {"active": False}
+
+
+def decide_governance(task: str, context: Optional[Dict[str, Any]] = None, fast: bool = True) -> Dict[str, Any]:
+    """
+    Programmatic governance decision for routing and swarming.
+
+    Clean internal API the router/integration can call without full verbose
+    synthesis or 6-seat execution (optimized for speed on automatic calls).
+
+    - Always runs cheap classify_itil + probe_t2 + validate_swarm_plan.
+    - Gets tier via (guarded) optimise.
+    - When called from router (context['from_router']=True), influences free-tier
+      preference (prefer T2 free cloud over T1 unless privacy/security).
+    - Keeps governance logging (via log_governance_decision).
+    - Supports BOA_BACKEND=live (noted, but seat exec skipped in fast path).
+    - Returns exactly: tier, swarm_size, itil, rationale, seats_used.
+
+    Use fast=True (default) for auto/router calls → lightweight path.
+    For full board use run_boa() or CLI.
+    """
+    context = context or {}
+    from_router = bool(context.get("from_router") or context.get("lightweight"))
+
+    if _BOA_REENTRY["active"]:
+        # avoid loop: return safe lightweight defaults without further calls
+        return {
+            "tier": "T2",
+            "swarm_size": 1,
+            "itil": {
+                "is_ops": False,
+                "classification": "unknown",
+                "confidence": 0.0,
+                "prefix": "",
+                "keywords_matched": [],
+                "requires_chg_number": False,
+            },
+            "rationale": "reentry guard (avoided router<->boa loop) — default T2 lightweight",
+            "seats_used": 1,
+        }
+
+    _BOA_REENTRY["active"] = True
+    try:
+        # ITIL (cheap, always)
+        itil = classify_itil(task)
+
+        # TOS probe (cheap)
+        tos_probe = probe_t2_gateways(task)
+
+        # Swarm plan validation (cheap)
+        swarm_gov = validate_swarm_plan(task)
+
+        # Tier via lazy monica (already guarded at run_boa level too)
+        try:
+            from token_optimiser.monica_integration import optimise
+            decision = optimise(task, context or {})
+            tier = decision.get("tier", "T2")
+            base_rationale = decision.get("rationale", "")
+        except Exception:
+            tier = "T2"
+            base_rationale = "fallback (optimise unavailable in decide_governance)"
+
+        # Influence free-tier preference when called from router
+        if from_router:
+            task_l = task.lower()
+            is_privacy = any(k in task_l for k in ["privacy", "secret", "local-only", "offline", "sensitive"])
+            is_security = any(k in task_l for k in ["security", "auth", "encrypt", "vulnerab", "credential", "key"])
+            if tier == "T1" and not is_privacy:
+                tier = "T2"
+                base_rationale += " | BOA governance: free-tier preference (T2 over T1 for non-private)"
+            elif is_security:
+                tier = "T3"
+                base_rationale += " | BOA governance: security forces T3"
+            # note: T2 is already default free preference in router/config
+
+        # Decide swarm_size from governance
+        if swarm_gov.get("governed") and swarm_gov.get("should_delegate", False):
+            sc = swarm_gov.get("sizing", {}).get("worker_count")
+            swarm_size = int(sc) if sc and sc >= 2 else 3
+        else:
+            swarm_size = 1
+
+        # seats_used: lightweight=1 for auto speed; 6 when full board needed
+        # (decide itself never executes seats; it reports what should be used)
+        seats_used = 6 if (not fast and not from_router) else 1
+
+        # Build rationale
+        rationale = base_rationale
+        if itil.get("is_ops"):
+            rationale += f" | ITIL:{itil['classification']}@{itil['confidence']}"
+        if swarm_gov.get("governed"):
+            rationale += f" | swarm_size={swarm_size} (delegate={swarm_gov.get('should_delegate')})"
+        if tos_probe.get("probed"):
+            rationale += " | TOS-probed"
+
+        # Keep the governance logging (even for fast programmatic calls)
+        try:
+            # Resolve relative to repo root (supports any clone dir name e.g. neo-light)
+            _repo_root = Path(__file__).resolve().parents[2]
+            work_dir = Path(context.get("work_dir", str(_repo_root / "work/boa")))
+            log_governance_decision(
+                question=task,
+                itil_classification=itil,
+                tos_probe=tos_probe,
+                swarm_governance=swarm_gov,
+                work_dir=work_dir,
+            )
+        except Exception:
+            # logging failure must never break decision path
+            pass
+
+        return {
+            "tier": tier,
+            "swarm_size": swarm_size,
+            "itil": itil,
+            "rationale": rationale,
+            "seats_used": seats_used,
+        }
+    finally:
+        _BOA_REENTRY["active"] = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -866,8 +886,7 @@ def run_boa(
         Additional context passed to monica_integration.optimise (e.g.
         estimated_lines, domain).
     work_dir : Path, optional
-        Directory for session logs. Defaults to
-        /home/warpuppy/Projects/light-engine/work/boa.
+        Directory for session logs. Defaults to <repo>/work/boa (resolved relative to package for any clone name e.g. neo-light).
 
     Returns
     -------
@@ -886,7 +905,12 @@ def run_boa(
         }
     """
     if work_dir is None:
-        work_dir = Path("/home/warpuppy/Projects/light-engine/work/boa")
+        # Resolve relative to repo root (supports any clone dir name e.g. neo-light)
+        _repo_root = Path(__file__).resolve().parents[2]
+        work_dir = Path(context.get("work_dir", str(_repo_root / "work/boa"))) if context else (_repo_root / "work/boa")
+
+    # Lazy import to avoid circular dependency with monica_integration
+    from token_optimiser.monica_integration import optimise
 
     # 0. ITIL classification (always run — cheap)
     itil_classification = classify_itil(question)
