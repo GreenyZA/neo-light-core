@@ -45,7 +45,7 @@ def tmp_learning_log(tmp_path):
 @pytest.fixture
 def router(tmp_learning_log):
     """Return a TokenRouter instance patched to use temp log."""
-    from .router import TokenRouter
+    from token_optimiser.router import TokenRouter
     r = TokenRouter()
     r.learning_log_path = tmp_learning_log
     return r
@@ -54,7 +54,7 @@ def router(tmp_learning_log):
 @pytest.fixture
 def learning_log(tmp_learning_log):
     """Return a LearningLog instance patched to use temp log."""
-    from .router import LearningLog
+    from token_optimiser.router import LearningLog
     log = LearningLog(path=tmp_learning_log)
     return log
 
@@ -62,7 +62,7 @@ def learning_log(tmp_learning_log):
 @pytest.fixture
 def fresh_config():
     """Return a fresh TokenOptimiserConfig with defaults."""
-    from .config import TokenOptimiserConfig
+    from token_optimiser.config import TokenOptimiserConfig
     cfg = TokenOptimiserConfig()
     return cfg
 
@@ -134,7 +134,7 @@ class TestTOSRoutingPipeline:
 
     def test_disabled_router_defaults_to_t2(self):
         """When disabled, router should return T2 with low confidence."""
-        from .router import TokenRouter
+        from token_optimiser.router import TokenRouter
         r = TokenRouter(config={"enabled": False})
         d = r.assess("Any task")
         assert d.tier == "T2"
@@ -158,7 +158,7 @@ class TestBOASessionEndToEnd:
 
     def test_boa_returns_all_required_fields(self, tmp_path):
         """BOA session returns tier, confidence, seat_answers, synthesis, log_path."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa(
             "What is the best approach for caching?",
             work_dir=tmp_path,
@@ -173,7 +173,7 @@ class TestBOASessionEndToEnd:
 
     def test_boa_seat_answers_have_6_seats(self, tmp_path):
         """BOA should always produce answers from all 6 board seats."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa("How to structure a microservice?", work_dir=tmp_path)
         assert len(result["seat_answers"]) == 6
         seat_ids = {s["seat_id"] for s in result["seat_answers"]}
@@ -183,7 +183,7 @@ class TestBOASessionEndToEnd:
 
     def test_boa_session_log_written(self, tmp_path):
         """BOA session log file should be created."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa("Test question", work_dir=tmp_path)
         log_path = Path(result["log_path"])
         assert log_path.exists()
@@ -193,7 +193,7 @@ class TestBOASessionEndToEnd:
 
     def test_boa_itil_classification(self):
         """BOA ITIL classification should detect incidents."""
-        from .boa import classify_itil
+        from token_optimiser.boa import classify_itil
         result = classify_itil("TOS hops stale — service is down")
         assert result["is_ops"] is True
         assert result["classification"] == "incident"
@@ -201,7 +201,7 @@ class TestBOASessionEndToEnd:
 
     def test_boa_itil_change_detection(self):
         """BOA ITIL classification should detect change requests."""
-        from .boa import classify_itil
+        from token_optimiser.boa import classify_itil
         result = classify_itil("Change the routing config to use new provider")
         assert result["is_ops"] is True
         assert result["classification"] == "change"
@@ -209,14 +209,14 @@ class TestBOASessionEndToEnd:
 
     def test_boa_itil_non_ops(self):
         """Non-ops questions should not trigger ITIL classification."""
-        from .boa import classify_itil
+        from token_optimiser.boa import classify_itil
         result = classify_itil("What is the meaning of life?")
         assert result["is_ops"] is False
         assert result["classification"] == "unknown"
 
     def test_boa_tos_probe_for_routing_questions(self, tmp_path):
         """Routing questions should trigger TOS probe."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa("Which free models are available for code generation?", work_dir=tmp_path)
         tos_probe = result["tos_probe"]
         assert tos_probe.get("probed") is True
@@ -224,26 +224,26 @@ class TestBOASessionEndToEnd:
 
     def test_boa_non_routing_question_no_probe(self, tmp_path):
         """Non-routing questions should not trigger TOS probe."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa("What is the capital of France?", work_dir=tmp_path)
         tos_probe = result["tos_probe"]
         assert tos_probe.get("probed") is False
 
     def test_boa_governance_log_for_incidents(self, tmp_path):
         """Incident questions should produce a governance log."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa("Service is down — all endpoints returning 503", work_dir=tmp_path)
         assert result["governance_log_path"] is not None
 
     def test_boa_swarm_governance(self, tmp_path):
         """Swarm-related questions should trigger governance validation."""
-        from .boa import run_boa, validate_swarm_plan
+        from token_optimiser.boa import run_boa, validate_swarm_plan
         governance = validate_swarm_plan("Use 5 workers to process 10 files in parallel")
         assert governance["governed"] is True
 
     def test_boa_synthesis_includes_board_info(self, tmp_path):
         """Synthesis paragraph should mention tier and seat count."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         result = run_boa("Best practices for API design?", work_dir=tmp_path)
         synthesis = result["synthesis"]
         assert result["tier"] in synthesis
@@ -340,13 +340,13 @@ class TestLearningLogWriteReadBack:
 
     def test_get_entries_no_file(self, tmp_path):
         """get_entries should return [] when the log file doesn't exist."""
-        from .router import LearningLog
+        from token_optimiser.router import LearningLog
         log = LearningLog(path=str(tmp_path / "nonexistent.jsonl"))
         assert log.get_entries() == []
 
     def test_get_recent_no_file(self, tmp_path):
         """get_recent should return [] when the log file doesn't exist."""
-        from .router import LearningLog
+        from token_optimiser.router import LearningLog
         log = LearningLog(path=str(tmp_path / "nonexistent.jsonl"))
         assert log.get_recent() == []
 
@@ -378,39 +378,39 @@ class TestConfigCalibration:
 
     def test_calibration_stored_in_config(self):
         """Calibration overrides should be stored in config."""
-        from .config import TokenOptimiserConfig
+        from token_optimiser.config import TokenOptimiserConfig
         cfg = TokenOptimiserConfig()
         cfg.confidence_calibration["security"] = 10
         assert cfg.confidence_calibration["security"] == 10
 
     def test_calibration_update_function(self):
         """update_calibration should modify config in place."""
-        from .config import TokenOptimiserConfig, update_calibration
+        from token_optimiser.config import TokenOptimiserConfig, update_calibration
         # Note: update_calibration works on the global config
         # We just verify the function exists and doesn't crash
         update_calibration("test_category", 5)
 
     def test_reset_calibration(self):
         """reset_calibration should clear all overrides."""
-        from .config import TokenOptimiserConfig, reset_calibration
+        from token_optimiser.config import TokenOptimiserConfig, reset_calibration
         reset_calibration()
 
     def test_category_confidence_caps(self):
         """Category confidence caps should limit max confidence per category."""
-        from .config import TokenOptimiserConfig
+        from token_optimiser.config import TokenOptimiserConfig
         cfg = TokenOptimiserConfig()
         # Security has a default cap of 55
         assert cfg.category_confidence_caps.get("security") == 55
 
     def test_security_cap_55_percent(self):
         """Security tasks must not exceed 55% confidence."""
-        from .config import TokenOptimiserConfig
+        from token_optimiser.config import TokenOptimiserConfig
         cfg = TokenOptimiserConfig()
         assert cfg.security_confidence_cap == 55
 
     def test_config_to_dict_roundtrip(self):
         """Config should serialize to dict with all key fields."""
-        from .config import TokenOptimiserConfig
+        from token_optimiser.config import TokenOptimiserConfig
         cfg = TokenOptimiserConfig()
         d = cfg.to_dict()
         assert "enabled" in d
@@ -421,7 +421,7 @@ class TestConfigCalibration:
 
     def test_config_set_enabled(self):
         """set_enabled should toggle config.enabled."""
-        from .config import TokenOptimiserConfig, set_enabled, is_enabled
+        from token_optimiser.config import TokenOptimiserConfig, set_enabled, is_enabled
         # Test both directions
         set_enabled(False)
         assert is_enabled() is False
@@ -430,13 +430,13 @@ class TestConfigCalibration:
 
     def test_thresholds_ordering(self):
         """T1 threshold should be higher than T2 threshold."""
-        from .config import TokenOptimiserConfig
+        from token_optimiser.config import TokenOptimiserConfig
         cfg = TokenOptimiserConfig()
         assert cfg.threshold_t1_min > cfg.threshold_t2_min
 
     def test_scope_word_thresholds_ordering(self):
         """Scope word thresholds should have small < medium."""
-        from .config import TokenOptimiserConfig
+        from token_optimiser.config import TokenOptimiserConfig
         cfg = TokenOptimiserConfig()
         assert cfg.scope_word_thresholds["small"] < cfg.scope_word_thresholds["medium"]
 
@@ -525,7 +525,7 @@ class TestSecurityTaskRouting:
 
     def test_security_cap_from_config(self, router):
         """The security cap value should come from config."""
-        from .config import config
+        from token_optimiser.config import config
         assert config.security_confidence_cap == 55
         decision = router.assess("Implement end-to-end encryption")
         assert decision.confidence <= config.security_confidence_cap
@@ -538,7 +538,7 @@ class TestSecurityTaskRouting:
 
     def test_category_confidence_caps_structure(self, router):
         """category_confidence_caps should be a dict with security entry."""
-        from .config import config
+        from token_optimiser.config import config
         assert isinstance(config.category_confidence_caps, dict)
         assert "security" in config.category_confidence_caps
 
@@ -552,7 +552,7 @@ class TestMockBackendIntegration:
 
     def test_t1_mock_backend_returns_response(self):
         """T1 mock backend should return a valid response dict."""
-        from .mock_backends import T1MockBackend
+        from token_optimiser.mock_backends import T1MockBackend
         backend = T1MockBackend()
         result = backend.generate("Fix typo in title")
         assert result["tier"] == "T1"
@@ -561,7 +561,7 @@ class TestMockBackendIntegration:
 
     def test_t2_mock_backend_returns_response(self):
         """T2 mock backend should return a valid response dict."""
-        from .mock_backends import T2MockBackend
+        from token_optimiser.mock_backends import T2MockBackend
         backend = T2MockBackend()
         result = backend.generate("Implement a new API endpoint")
         assert result["tier"] == "T2"
@@ -570,7 +570,7 @@ class TestMockBackendIntegration:
 
     def test_t3_mock_backend_returns_response(self):
         """T3 mock backend should return a valid response dict."""
-        from .mock_backends import T3MockBackend
+        from token_optimiser.mock_backends import T3MockBackend
         backend = T3MockBackend()
         result = backend.generate("Review security architecture")
         assert result["tier"] == "T3"
@@ -579,7 +579,7 @@ class TestMockBackendIntegration:
 
     def test_mock_gateway_routes_to_correct_backend(self):
         """MockGateway should route to the correct tier backend."""
-        from .mock_backends import MockGateway
+        from token_optimiser.mock_backends import MockGateway
         gw = MockGateway({"mock_mode": True})
         result = gw.execute("T1", "Simple task")
         assert result["tier"] == "T1"
@@ -587,14 +587,14 @@ class TestMockBackendIntegration:
 
     def test_mock_gateway_invalid_tier(self):
         """MockGateway should handle invalid tier gracefully."""
-        from .mock_backends import MockGateway
+        from token_optimiser.mock_backends import MockGateway
         gw = MockGateway({"mock_mode": True})
         result = gw.execute("T99", "Task")
         assert "error" in result
 
     def test_mock_gateway_history_tracking(self):
         """MockGateway should track execution history."""
-        from .mock_backends import MockGateway
+        from token_optimiser.mock_backends import MockGateway
         gw = MockGateway({"mock_mode": True})
         gw.execute("T1", "Task 1")
         gw.execute("T2", "Task 2")
@@ -603,7 +603,7 @@ class TestMockBackendIntegration:
 
     def test_mock_backend_history(self):
         """MockBackendHistory should record and retrieve entries."""
-        from .mock_backends import MockBackendHistory
+        from token_optimiser.mock_backends import MockBackendHistory
         hist = MockBackendHistory()
         hist.record("T1", "Task 1", confidence=85, outcome="worked")
         hist.record("T2", "Task 2", confidence=70, outcome="worked")
@@ -613,7 +613,7 @@ class TestMockBackendIntegration:
 
     def test_test_harness_end_to_end(self, tmp_learning_log):
         """OptimiserTestHarness should run full assess-execute-feedback loop."""
-        from .mock_backends import OptimiserTestHarness
+        from token_optimiser.mock_backends import OptimiserTestHarness
         harness = OptimiserTestHarness({"mock_mode": True})
         # Override learning log path
         result = harness.run_task("Fix typo in title")
@@ -631,25 +631,25 @@ class TestOrchestratorRouting:
 
     def test_review_task_minimum_t2(self, router):
         """Review tasks should have minimum tier T2."""
-        from .router import route_orchestrator_task
+        from token_optimiser.router import route_orchestrator_task
         decision = route_orchestrator_task("review this code", 90)
         assert decision.tier in ("T2", "T3")  # Should not be T1
 
     def test_orchestrate_task_minimum_t2(self, router):
         """Orchestrate tasks should have minimum tier T2."""
-        from .router import route_orchestrator_task
+        from token_optimiser.router import route_orchestrator_task
         decision = route_orchestrator_task("orchestrate the deployment", 90)
         assert decision.tier in ("T2", "T3")
 
     def test_simple_worker_can_be_t1(self):
         """Simple worker tasks can be T1 if confidence is high enough."""
-        from .router import route_orchestrator_task
+        from token_optimiser.router import route_orchestrator_task
         decision = route_orchestrator_task("simple_worker", 90)
         assert decision.tier in ("T1", "T2")
 
     def test_orchestrator_hints_present(self):
         """Orchestrator routing should include hints."""
-        from .router import route_orchestrator_task
+        from token_optimiser.router import route_orchestrator_task
         decision = route_orchestrator_task("orchestrate multi-agent task", 85)
         assert decision.orchestrator_hints is not None
         assert "recommended_workers" in decision.orchestrator_hints
@@ -657,7 +657,7 @@ class TestOrchestratorRouting:
 
     def test_complex_worker_needs_review(self):
         """Complex worker tasks should require review."""
-        from .router import route_orchestrator_task
+        from token_optimiser.router import route_orchestrator_task
         decision = route_orchestrator_task("complex_worker task", 75)
         assert decision.orchestrator_hints["needs_review"] is True
 
@@ -671,12 +671,12 @@ class TestDashboardAPI:
 
     def test_dashboard_imports(self):
         """Dashboard app should import without errors."""
-        from .dashboard import app
+        from token_optimiser.dashboard import app
         assert app is not None
 
     def test_dashboard_has_expected_routes(self):
         """Dashboard should have key API routes registered."""
-        from .dashboard import app
+        from token_optimiser.dashboard import app
         routes = {r.path for r in app.routes}
         assert "/api/config" in routes
         assert "/api/learning-log" in routes
@@ -726,7 +726,7 @@ class TestCrossModuleIntegration:
 
     def test_monica_optimise_returns_dict(self):
         """monica_integration.optimise should return a dict."""
-        from .monica_integration import optimise
+        from token_optimiser.monica_integration import optimise
         result = optimise("Fix typo in title")
         assert isinstance(result, dict)
         assert "tier" in result
@@ -734,14 +734,14 @@ class TestCrossModuleIntegration:
 
     def test_monica_optimise_batch(self):
         """monica_integration.optimise_batch should return a list of dicts."""
-        from .monica_integration import optimise_batch
+        from token_optimiser.monica_integration import optimise_batch
         results = optimise_batch(["Fix typo", "Write class"])
         assert isinstance(results, list)
         assert len(results) == 2
 
     def test_monica_record_outcome(self, learning_log, router):
         """monica_integration.record_outcome should update learning log."""
-        from .monica_integration import record_outcome
+        from token_optimiser.monica_integration import record_outcome
         decision = router.assess("Fix typo")
         learning_log.append(decision)
         task_id = decision.to_dict()["task_id"]
@@ -752,26 +752,26 @@ class TestCrossModuleIntegration:
 
     def test_monica_get_learning_log(self):
         """monica_integration.get_learning_log should return a list."""
-        from .monica_integration import get_learning_log
+        from token_optimiser.monica_integration import get_learning_log
         result = get_learning_log(limit=10)
         assert isinstance(result, list)
 
     def test_get_orchestrator_routing(self):
         """get_orchestrator_routing should return a dict with routing info."""
-        from .monica_integration import get_orchestrator_routing
+        from token_optimiser.monica_integration import get_orchestrator_routing
         result = get_orchestrator_routing("orchestrate deployment", 85)
         assert isinstance(result, dict)
         assert "tier" in result
 
     def test_should_review(self):
         """should_review should return bool."""
-        from .monica_integration import should_review
+        from token_optimiser.monica_integration import should_review
         assert isinstance(should_review("review this code"), bool)
         assert isinstance(should_review("simple task"), bool)
 
     def test_boa_uses_monica_integration(self, tmp_path):
         """BOA should use monica_integration.optimise internally."""
-        from .boa import run_boa
+        from token_optimiser.boa import run_boa
         # This tests the integration path
         result = run_boa("Test integration question", work_dir=tmp_path)
         assert result["tier"] in ("T1", "T2", "T3", "ASK")
@@ -779,8 +779,8 @@ class TestCrossModuleIntegration:
 
     def test_router_boa_same_assessment(self, tmp_path):
         """Router and BOA should agree on tier for the same question."""
-        from .router import TokenRouter
-        from .boa import run_boa
+        from token_optimiser.router import TokenRouter
+        from token_optimiser.boa import run_boa
 
         question = "What is the best caching strategy?"
         router = TokenRouter()
