@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .router import LearningLog
+from router import LearningLog
 
 
 def calibrate_confidence(category: str, base_confidence: int) -> int:
@@ -51,7 +51,7 @@ def optimise(task: str, context: Optional[dict] = None) -> Dict[str, Any]:
     """
     Assess a task and return a routing decision with parallelization info.
     """
-    from .router import TokenRouter
+    from router import TokenRouter
     router = TokenRouter()
     decision = router.assess(task, context or {})
     result = decision.to_dict()
@@ -77,7 +77,7 @@ def optimise(task: str, context: Optional[dict] = None) -> Dict[str, Any]:
 
 
 def optimise_batch(tasks: List[str], context: Optional[dict] = None) -> List[Dict[str, Any]]:
-    from .router import TokenRouter
+    from router import TokenRouter
     router = TokenRouter()
     results = []
     for task in tasks:
@@ -100,18 +100,18 @@ def optimise_batch(tasks: List[str], context: Optional[dict] = None) -> List[Dic
 
 
 def optimiser_enabled() -> bool:
-    from .config import config
+    from config import config
     return bool(config.enabled)
 
 
 def record_outcome(task_id: str, outcome: dict) -> bool:
-    from .router import LearningLog
+    from router import LearningLog
     log = LearningLog()
     return log.append_outcome(task_id, outcome)
 
 
 def get_learning_log(limit: int = 50) -> List[dict]:
-    from .router import LearningLog
+    from router import LearningLog
     log = LearningLog()
     return log.get_recent(limit)
 
@@ -124,7 +124,7 @@ def get_orchestrator_routing(task_type: str, confidence: int) -> Dict[str, Any]:
     reviews and orchestrator tasks land on a capable tier.  Same task_type +
     same confidence + same config ⇒ same decision (deterministic).
     """
-    from .router import route_orchestrator_task
+    from router import route_orchestrator_task
     decision = route_orchestrator_task(task_type, confidence)
     return decision.to_dict()
 
@@ -135,7 +135,7 @@ def should_review(task_type: str) -> bool:
 
     Deterministic: depends only on the task_type and config.enforce_review.
     """
-    from .config import config
+    from config import config
     if not config.enforce_review:
         return False
     task_lower = task_type.lower()
@@ -153,7 +153,7 @@ optimiser. This is mandatory — every agent call passes through it.
 
 ### How to call it
 
-    from .monica_integration import optimise, optimiser_enabled
+    from monica_integration import optimise, optimiser_enabled
     decision = optimise(task_description, {"estimated_lines": 50})
 
 ### Tier meanings (UPDATED 2026-09-19)
@@ -193,7 +193,7 @@ For ALL other tasks, T2 free cloud is the FIRST choice.
 
 After the worker completes:
 
-    from .monica_integration import record_outcome
+    from monica_integration import record_outcome
     record_outcome(decision["task_id"], {
         "outcome_type": "worked",
         "details": "Worker completed successfully"

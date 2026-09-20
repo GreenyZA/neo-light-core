@@ -22,9 +22,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from ..config import config
-from ..router import TokenRouter, LearningLog
-from token_optimiser.dashboard.ollama_control import register_ollama_endpoints
+from config import config
+from router import TokenRouter, LearningLog
+from dashboard.ollama_control import register_ollama_endpoints
 
 logger = logging.getLogger("token-optimiser-dashboard")
 app = FastAPI(title="Token Optimiser Dashboard", version="0.1.0")

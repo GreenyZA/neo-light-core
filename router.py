@@ -406,7 +406,7 @@ def route_orchestrator_task(task_type: str, base_confidence: int) -> "RoutingDec
     return a RoutingDecision that enforces minimum tier, recommended workers,
     and review requirements.  Same task_type + same config ⇒ same decision.
     """
-    from .config import config
+    from config import config
 
     task_lower = task_type.lower()
     match = None
@@ -461,7 +461,7 @@ def route_orchestrator_task(task_type: str, base_confidence: int) -> "RoutingDec
 
 def _confidence_to_tier(confidence: int) -> str:
     """Simple confidence → tier mapping (mirrors standard routing bands)."""
-    from .config import config
+    from config import config
     if confidence >= config.threshold_t1_min:
         return "T1"
     if confidence >= config.threshold_t2_min:
@@ -479,13 +479,13 @@ class TokenRouter:
     def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self.learning_log_path = self.config.get(
-            "learning_log_path", "token_optimiser/learning_log.jsonl"
+            "learning_log_path", "learning_log.jsonl"
         )
         if "enabled" in self.config:
             self.enabled = self.config["enabled"]
         else:
             try:
-                from .config import config as _global
+                from config import config as _global
                 self.enabled = _global.enabled
             except ImportError:
                 self.enabled = True
@@ -523,7 +523,7 @@ class TokenRouter:
         confidence = max(0, min(99, confidence))
 
         # Apply category-level confidence caps
-        from .config import config
+        from config import config
         for m in matches:
             cat_name = m["name"]
             cap = config.category_confidence_caps.get(cat_name)
@@ -586,7 +586,7 @@ class TokenRouter:
         - Presence of parallelizable keywords
         - Task word count (longer tasks → more parallelizable)
         """
-        from .config import config
+        from config import config
 
         task_lower = task.lower()
 
@@ -665,7 +665,7 @@ class TokenRouter:
         Non-trivial = score >8 .
         Strongly biases toward T2 free tier usage for workers unless security/change forces T3.
         """
-        from .config import config
+        from config import config
 
         file_count = self._estimate_file_count(task)
         module_count = self._estimate_module_count(task)
@@ -774,7 +774,7 @@ class TokenRouter:
 
     def _determine_scope(self, words: int, lines_hint: Optional[int], task_text: str = "") -> str:
         """Determine task scope: small, medium, or large."""
-        from .config import config
+        from config import config
 
         if task_text:
             import re
@@ -838,7 +838,7 @@ class TokenRouter:
         Now driven by ITIL/BOA governance: prioritize free (T2) aggressively unless
         security or change classification forces T3.
         """
-        from .config import config
+        from config import config
 
         # ── ITIL / BOA GOVERNANCE OVERRIDE FIRST (forces T3 for change/security even on ambiguous) ─
         if itil_classification and itil_classification.get("is_ops"):
@@ -911,7 +911,7 @@ class TokenRouter:
     def _build_rationale(self, matches: list, scope: str, confidence: int, tier: str,
                          unique_categories: int = 0) -> str:
         """Build a human-readable rationale for the routing decision."""
-        from .config import config
+        from config import config
 
         self._last_matches = matches
 
@@ -1000,7 +1000,7 @@ class RoutingDecision:
 class LearningLog:
     """Append-only log of routing decisions and their outcomes."""
 
-    def __init__(self, path: str = "token_optimiser/learning_log.jsonl"):
+    def __init__(self, path: str = "learning_log.jsonl"):
         self.path = path
 
     def append(self, decision: Optional[RoutingDecision] = None, outcome: Optional[dict] = None, extra: Optional[dict] = None):
