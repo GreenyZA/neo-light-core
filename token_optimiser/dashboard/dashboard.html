@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Optimiser Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #e1e4e8; min-height: 100vh; padding: 20px; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 8px; color: #fff; }
+  .subtitle { color: #8b949e; margin-bottom: 24px; font-size: 0.9rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+  .card h2 { font-size: 1rem; margin-bottom: 12px; color: #f0f6fc; display: flex; align-items: center; gap: 8px; }
+  .card h2 .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 12px; font-weight: normal; }
+  .badge-green { background: #238636; color: #fff; }
+  .badge-red { background: #da3633; color: #fff; }
+  .badge-yellow { background: #d29922; color: #fff; }
+  .badge-blue { background: #1f6feb; color: #fff; }
+  .badge-gray { background: #484f58; color: #fff; }
+  label { display: block; font-size: 0.8rem; color: #8b949e; margin-bottom: 4px; }
+  .form-row { margin-bottom: 12px; }
+  input[type="text"], input[type="number"], select, textarea {
+    width: 100%; background: #0d1117; border: 1px solid #30363d; color: #e1e4e8;
+    padding: 8px 10px; border-radius: 6px; font-size: 0.85rem; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: #1f6feb; }
+  textarea { resize: vertical; min-height: 60px; font-family: monospace; font-size: 0.8rem; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 500; font-family: inherit; transition: opacity 0.15s; }
+  .btn-primary { background: #1f6feb; color: #fff; }
+  .btn-danger { background: #da3633; color: #fff; }
+  .btn-success { background: #238636; color: #fff; }
+  .btn-ghost { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label { font-size: 0.85rem; }
+  .toggle-label small { color: #8b949e; display: block; font-size: 0.75rem; margin-top: 2px; }
+  .switch { position: relative; width: 40px; height: 22px; background: #484f58; border-radius: 11px; cursor: pointer; transition: background 0.2s; }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+  .switch.on { background: #1f6feb; }
+  .switch.on::after { transform: translateX(18px); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 500; background: #0d1117; position: sticky; top: 0; }
+  td { color: #c9d1d9; }
+  tr:hover { background: #1c2128; }
+  .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .stat { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; min-width: 80px; text-align: center; }
+  .stat .val { font-size: 1.5rem; font-weight: 600; color: #fff; }
+  .stat .lbl { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .test-console { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-top: 16px; }
+  .test-console textarea { background: #0d1117; border-color: #30363d; }
+  .results { margin-top: 8px; max-height: 300px; overflow-y: auto; }
+  .result-item { padding: 8px 10px; border-bottom: 1px solid #21262d; font-size: 0.8rem; }
+  .result-item:last-child { border-bottom: none; }
+  .result-item .tier { font-weight: 600; }
+  .result-item .conf { color: #d29922; }
+  .result-item .rationale { color: #8b949e; font-size: 0.75rem; margin-top: 2px; }
+  .result-item.ASK { border-left: 3px solid #d29922; }
+  .result-item.T1 { border-left: 3px solid #238636; }
+  .result-item.T2 { border-left: 3px solid #1f6feb; }
+  .result-item.T3 { border-left: 3px solid #da3633; }
+  .section-title { font-size: 0.9rem; color: #8b949e; margin: 20px 0 8px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; }
+  .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 0.85rem; z-index: 1000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.success { background: #238636; }
+  .toast.error { background: #da3633; }
+  .nav-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #30363d; padding-bottom: 0; flex-wrap: wrap; }
+  .nav-tab { padding: 8px 16px; background: none; border: none; color: #8b949e; cursor: pointer; font-size: 0.85rem; font-family: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .nav-tab.active { color: #f0f6fc; border-bottom-color: #1f6feb; }
+  .nav-tab:hover { color: #c9d1d9; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .copy-btn { float: right; background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+  .copy-btn:hover { color: #c9d1d9; }
+  .json-block { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: #c9d1d9; max-height: 200px; overflow-y: auto; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🧾 Token Optimiser Dashboard</h1>
+  <div class="subtitle">Live controls for routing, tiers, confidence, learning log, Ollama server, and analytics</div>
+
+  <div class="stat-row" id="stats">
+    <div class="stat"><div class="val" id="stat-total">-</div><div class="lbl">Total Routes</div></div>
+    <div class="stat"><div class="val" id="stat-t1">-</div><div class="lbl">T1</div></div>
+    <div class="stat"><div class="val" id="stat-t2">-</div><div class="lbl">T2</div></div>
+    <div class="stat"><div class="val" id="stat-t3">-</div><div class="lbl">T3</div></div>
+    <div class="stat"><div class="val" id="stat-ask">-</div><div class="lbl">ASK</div></div>
+  </div>
+
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="general">General</button>
+    <button class="nav-tab" data-tab="thresholds">Thresholds</button>
+    <button class="nav-tab" data-tab="categories">Categories</button>
+    <button class="nav-tab" data-tab="scope">Scope</button>
+    <button class="nav-tab" data-tab="tiers">Tiers</button>
+    <button class="nav-tab" data-tab="test">Test Console</button>
+    <button class="nav-tab" data-tab="log">Learning Log</button>
+    <button class="nav-tab" data-tab="analytics">Analytics</button>
+    <button class="nav-tab" data-tab="ollama">Ollama Server</button>
+  </div>
+
+  <div class="tab-content active" id="tab-general">
+    <div class="grid">
+      <div class="card">
+        <h2><span style="color:#1f6feb">●</span> Optimiser Status</h2>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Token Optimiser</div>
+            <small>Master on/off switch. Disabling reverts all routing to T2 baseline.</small>
+          </div>
+          <div class="switch on" id="toggle-enabled" data-key="enabled"></div>
+        </div>
+        <div class="form-row" style="margin-top: 8px;">
+          <label>Learning Log Path</label>
+          <input type="text" id="f-log-path" value="">
+        </div>
+      </div>
+      <div class="card">
+        <h2><span style="color:#d29922">⚠</span> Confidence Calibration</h2>
+        <div id="calibration-list"></div>
+        <div class="form-row">
+          <label>Add calibration for category</label>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="f-cal-category" placeholder="e.g. security, code_gen_small" style="flex: 1;">
+            <input type="number" id="f-cal-delta" placeholder="+/-" style="width: 60px;">
+            <button class="btn btn-primary" onclick="addCalibration()">Add</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2><span style="color:#8b949e">⚙</span> Config Diff from Defaults</h2>
+        <div id="config-diff" class="json-block">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-thresholds">
+    <div class="grid">
+      <div class="card">
+        <h2><span style="color:#238636">✓</span> Routing Thresholds</h2>
+        <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+          Tasks with confidence ≥ T1 threshold route to local. Below T3 threshold force T3.
+        </p>
+        <div class="form-row">
+          <label>T1 Minimum Confidence (≥)</label>
+          <input type="number" id="f-t1-min" min="0" max="100" value="80">
+        </div>
+        <div class="form-row">
+          <label>T2 Minimum Confidence (≥)</label>
+          <input type="number" id="f-t2-min" min="0" max="100" value="60">
+        </div>
+        <div class="form-row">
+          <label>T3 Always Below (<)</label>
+          <input type="number" id="f-t3-below" min="0" max="100" value="60">
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Hybrid Band Auto-Route</div>
+            <small>When True, tasks in 60-79% band auto-route to T2 instead of asking.</small>
+          </div>
+          <div class="switch on" id="toggle-hybrid" data-key="hybrid_band_enabled"></div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Ask Human Band</div>
+            <small>When True, tasks in 60-79% band ask you instead of auto-routing. Overrides hybrid.</small>
+          </div>
+          <div class="switch" id="toggle-ask-band" data-key="ask_human_band"></div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Ambiguous Tasks → ASK</div>
+            <small>When True, tasks matching 3+ categories are sent to ASK regardless of confidence.</small>
+          </div>
+          <div class="switch on" id="toggle-ambiguous" data-key="ambiguous_task_asks_human"></div>
+        </div>
+        <div style="margin-top: 12px;">
+          <button class="btn btn-success" onclick="saveThresholds()">Save Thresholds</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2><span style="color:#da3633">🔒</span> Category Confidence Caps</h2>
+        <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+          Hard caps per category. Tasks in a capped category never route above the cap.
+        </p>
+        <div id="caps-list"></div>
+        <div class="form-row">
+          <label>Add cap for category</label>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="f-cap-category" placeholder="e.g. architecture, git_main" style="flex: 1;">
+            <input type="number" id="f-cap-value" placeholder="max %" style="width: 60px;">
+            <button class="btn btn-primary" onclick="addCap()">Add</button>
+            <button class="btn btn-ghost" onclick="addCapNull()">Uncap</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-scope">
+    <div class="grid">
+      <div class="card">
+        <h2><span style="color:#d29922">🔍</span> Scope Detection</h2>
+        <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+          Scope prefixes override word-count heuristics. Format: <code>[small]</code>, <code>[scope:medium]</code>, <code>[size:large]</code>
+        </p>
+        <div class="form-row">
+          <label>Scope Detection Pattern (regex)</label>
+          <input type="text" id="f-scope-pattern" value="^\s*\[(small|scope:medium|size:large|lg|s)\]\s+">
+          <small style="color: #8b949e; font-size: 0.7rem;">Customize to match your preferred prefix style.</small>
+        </div>
+        <div class="form-row">
+          <label>Word-Count Thresholds</label>
+          <div style="display: flex; gap: 12px;">
+            <div style="flex: 1;">
+              <small style="color: #8b949e;">Small (< words)</small>
+              <input type="number" id="f-scope-small" value="30" style="width: 80px;">
+            </div>
+            <div style="flex: 1;">
+              <small style="color: #8b949e;">Medium (< words)</small>
+              <input type="number" id="f-scope-medium" value="100" style="width: 80px;">
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Recognized Prefix Values</label>
+          <textarea id="f-scope-values" rows="4">{"small":"small","s":"small","sm":"small","medium":"medium","m":"medium","med":"medium","large":"large","l":"large","lg":"large"}</textarea>
+          <small style="color: #8b949e; font-size: 0.7rem;">Map of prefix → canonical scope. Add shortcuts like "lg" → "large".</small>
+        </div>
+        <button class="btn btn-success" onclick="saveScope()">Save Scope Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-tiers">
+    <div class="grid">
+      <div class="card">
+        <h2><span style="color:#238636">T1</span> Local (Ollama)</h2>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">T1 Enabled</div>
+            <small>Local qwen2.5:3b on 192.168.1.10:8081 with Vulkan.</small>
+          </div>
+          <div class="switch on" id="toggle-t1" data-tier="T1" data-key="main"></div>
+        </div>
+        <div class="form-row">
+          <label>Endpoint URL</label>
+          <input type="text" id="f-t1-url" value="http://192.168.1.10:8081">
+        </div>
+        <div class="form-row">
+          <label>Model</label>
+          <input type="text" id="f-t1-model" value="qwen2.5:3b">
+        </div>
+        <div class="form-row">
+          <label>Max Prompt Tokens</label>
+          <input type="number" id="f-t1-max-tokens" value="2000">
+        </div>
+        <button class="btn btn-success" onclick="saveT1()">Save T1</button>
+      </div>
+      <div class="card">
+        <h2><span style="color:#1f6feb">T2</span> Free Cloud Gateways</h2>
+        <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+          Each gateway can be toggled independently. Dashboard can enable/disable, add, and remove.
+        </p>
+        <div id="t2-gateways"></div>
+        <div class="form-row" style="margin-top: 12px;">
+          <button class="btn btn-primary" onclick="addT2Gateway()">+ Add Gateway</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2><span style="color:#da3633">T3</span> Paid Providers</h2>
+        <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+          Each provider can be toggled on/off. Add new providers as you get API keys.
+        </p>
+        <div id="t3-providers"></div>
+        <div class="form-row" style="margin-top: 12px;">
+          <button class="btn btn-primary" onclick="addT3Provider()">+ Add Provider</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-categories">
+    <div class="card">
+      <h2>📊 Category Routing Breakdown</h2>
+      <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+        Every task assessed is matched against categories. This table shows how each category has been routed and the confidence levels.
+      </p>
+      <div class="stat-row" id="cat-stats"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Category</th><th>Total</th><th>Avg Conf</th><th>Min</th><th>Max</th><th>Dominant Tier</th><th>T1</th><th>T2</th><th>T3</th><th>ASK</th></tr>
+          </thead>
+          <tbody id="cat-table"></tbody>
+        </table>
+      </div>
+      <div style="margin-top: 12px;">
+        <button class="btn btn-ghost" onclick="loadCategories()">Refresh Categories</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-test">
+    <div class="card">
+      <h2>🧪 Test Console</h2>
+      <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 12px;">
+        Test routing decisions before committing to real backends.
+      </p>
+      <div class="test-console">
+        <textarea id="f-test-task" rows="3" placeholder="Describe a task to assess..."></textarea>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <input type="text" id="f-test-context" placeholder="Optional context JSON: {&quot;estimated_lines&quot;: 50}" style="flex: 1;">
+          <button class="btn btn-primary" onclick="runTest()">Assess</button>
+        </div>
+        <div class="results" id="test-results"></div>
+      </div>
+      <div style="margin-top: 12px;">
+        <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Batch Test</h3>
+        <textarea id="f-batch-tasks" rows="4" placeholder="One task per line..."></textarea>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="btn btn-primary" onclick="runBatch()">Assess Batch</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('f-batch-tasks').value=''">Clear</button>
+        </div>
+        <div class="results" id="batch-results" style="margin-top: 8px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-log">
+    <div class="card">
+      <h2>📋 Learning Log</h2>
+      <div class="stat-row" style="margin-bottom: 12px;">
+        <div class="stat"><div class="val" id="log-total">-</div><div class="lbl">Total Entries</div></div>
+        <div class="stat"><div class="val" id="log-t1">-</div><div class="lbl">T1</div></div>
+        <div class="stat"><div class="val" id="log-t2">-</div><div class="lbl">T2</div></div>
+        <div class="stat"><div class="val" id="log-t3">-</div><div class="lbl">T3</div></div>
+        <div class="stat"><div class="val" id="log-worked">-</div><div class="lbl">Worked</div></div>
+        <div class="stat"><div class="val" id="log-failed">-</div><div class="lbl">Failed</div></div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button class="btn btn-ghost" onclick="refreshLog()">Refresh</button>
+        <button class="btn btn-danger" onclick="clearLog()">Clear Log</button>
+        <span style="font-size: 0.8rem; color: #8b949e; align-self: center;">Entries shown: <strong id="log-count">50</strong></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Task</th><th>Tier</th><th>Conf</th><th>Outcome</th><th>Quality</th></tr>
+          </thead>
+          <tbody id="log-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-analytics">
+    <div class="card">
+      <h2>📊 Routing Analytics</h2>
+      <div class="stat-row" id="analytics-stats"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+        <div class="card" style="padding:12px;">
+          <h2 style="font-size:0.9rem;">Tier Usage Over Time</h2>
+          <div style="position:relative;height:220px;">
+            <canvas id="chart-tier-trend"></canvas>
+          </div>
+        </div>
+        <div class="card" style="padding:12px;">
+          <h2 style="font-size:0.9rem;">Confidence Distribution</h2>
+          <div style="position:relative;height:220px;">
+            <canvas id="chart-confidence-hist"></canvas>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+        <div class="card" style="padding:12px;">
+          <h2 style="font-size:0.9rem;">Routing by Category</h2>
+          <div style="position:relative;height:220px;">
+            <canvas id="chart-category-breakdown"></canvas>
+          </div>
+        </div>
+        <div class="card" style="padding:12px;">
+          <h2 style="font-size:0.9rem;">Effectiveness by Tier</h2>
+          <div id="analytics-effectiveness">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-ollama">
+    <div id="ollama-status">Loading Ollama status...</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let config = {};
+let logEntries = [];
+let analyticsCharts = {};
+let ollamaStatus = {};
+
+function toast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type + ' show';
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+function initSwitch(el, onChange) {
+  el.addEventListener('click', () => {
+    const isOn = el.classList.toggle('on');
+    onChange(isOn);
+  });
+}
+
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+async function loadConfig() {
+  config = await api('/api/config');
+  document.getElementById('f-log-path').value = config.learning_log_path || '';
+  initSwitch(document.getElementById('toggle-enabled'), async (on) => {
+    await api('/api/config/toggle', 'POST', { enabled: on });
+    config.enabled = on;
+    toast(on ? 'Optimiser enabled' : 'Optimiser disabled — reverting to T2');
+  });
+  initSwitch(document.getElementById('toggle-hybrid'), async (on) => {
+    await patchConfig({ hybrid_band_enabled: on });
+    config.hybrid_band_enabled = on;
+  });
+  initSwitch(document.getElementById('toggle-ask-band'), async (on) => {
+    await patchConfig({ ask_human_band: on });
+    config.ask_human_band = on;
+  });
+  initSwitch(document.getElementById('toggle-ambiguous'), async (on) => {
+    await patchConfig({ ambiguous_task_asks_human: on });
+    config.ambiguous_task_asks_human = on;
+  });
+  // T1 toggle switch
+  initSwitch(document.getElementById('toggle-t1'), async (on) => {
+    const t1 = { ...(config.tier_backends?.T1 || {}) };
+    t1.enabled = on;
+    await patchConfig({ tier_backends: { ...(config.tier_backends || {}), T1: t1 } });
+    config.tier_backends.T1.enabled = on;
+    toast(on ? 'T1 enabled' : 'T1 disabled');
+  });
+  document.getElementById('f-t1-min').value = config.threshold_t1_min ?? 80;
+  document.getElementById('f-t2-min').value = config.threshold_t2_min ?? 60;
+  document.getElementById('f-t3-below').value = config.threshold_t3_always_below ?? 60;
+  document.getElementById('f-scope-pattern').value = config.scope_prefix_pattern || '';
+  document.getElementById('f-scope-small').value = (config.scope_word_thresholds?.small) ?? 30;
+  document.getElementById('f-scope-medium').value = (config.scope_word_thresholds?.medium) ?? 100;
+  document.getElementById('f-scope-values').value = JSON.stringify(config.scope_prefix_values || {}, null, 2);
+  document.getElementById('f-t1-url').value = (config.tier_backends?.T1?.url) || '';
+  document.getElementById('f-t1-model').value = (config.tier_backends?.T1?.model) || '';
+  document.getElementById('f-t1-max-tokens').value = (config.tier_backends?.T1?.max_prompt_tokens) || 2000;
+  renderCalibration();
+  renderCaps();
+  renderT2Gateways();
+  renderT3Providers();
+  renderDiff();
+  renderGeneralStats();
+}
+
+async function patchConfig(partial) {
+  const updated = await api('/api/config', 'POST', partial);
+  Object.assign(config, updated.config);
+  return updated;
+}
+
+function renderCalibration() {
+  const list = document.getElementById('calibration-list');
+  const cal = config.confidence_calibration || {};
+  const cats = Object.keys(cal);
+  if (cats.length === 0) { list.innerHTML = '<p style="color:#8b949e;font-size:0.8rem;">No calibration adjustments yet.</p>'; return; }
+  list.innerHTML = cats.map(c => `
+    <div class="toggle-row">
+      <div class="toggle-label">${c} <span style="color:#d29922;">${cal[c]}</span></div>
+      <div style="display:flex;gap:4px;">
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.7rem;" onclick="adjCal('${c}', 1)">+1</button>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.7rem;" onclick="adjCal('${c}', 5)">+5</button>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.7rem;" onclick="adjCal('${c}', -1)">-1</button>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.7rem;" onclick="adjCal('${c}', -5)">-5</button>
+        <button class="btn btn-danger" style="padding:4px 8px;font-size:0.7rem;" onclick="adjCal('${c}', -cal['${c}'])">Reset</button>
+      </div>
+    </div>`).join('');
+}
+
+async function adjCal(category, delta) {
+  await api('/api/config/calibration', 'POST', { category, delta });
+  await loadConfig();
+  toast(`${category}: ${delta > 0 ? '+' : ''}${delta}`);
+}
+
+async function addCalibration() {
+  const cat = document.getElementById('f-cal-category').value.trim();
+  const delta = parseInt(document.getElementById('f-cal-delta').value);
+  if (!cat || isNaN(delta)) { toast('Fill in category and delta', 'error'); return; }
+  await api('/api/config/calibration', 'POST', { category: cat, delta });
+  document.getElementById('f-cal-category').value = '';
+  document.getElementById('f-cal-delta').value = '';
+  await loadConfig();
+  toast(`Calibration ${delta > 0 ? '+' : ''}${delta} applied to ${cat}`);
+}
+
+function renderCaps() {
+  const list = document.getElementById('caps-list');
+  const caps = config.category_confidence_caps || {};
+  const entries = Object.entries(caps).filter(([k, v]) => v !== null && v !== undefined);
+  if (entries.length === 0) { list.innerHTML = '<p style="color:#8b949e;font-size:0.8rem;">No category caps set. Security is hardcoded at 55% in config.</p>'; return; }
+  list.innerHTML = entries.map(([cat, val]) => `
+    <div class="toggle-row">
+      <div class="toggle-label">${cat} <span style="color:#da3633;">cap: ${val}%</span></div>
+      <div style="display:flex;gap:4px;">
+        <input type="number" id="cap-${cat}" value="${val}" style="width:50px;padding:4px 6px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e1e4e8;">
+        <button class="btn btn-success" style="padding:4px 8px;font-size:0.7rem;" onclick="setCap('${cat}')">Set</button>
+        <button class="btn btn-danger" style="padding:4px 8px;font-size:0.7rem;" onclick="removeCap('${cat}')">Remove</button>
+      </div>
+    </div>`).join('');
+}
+
+async function setCap(cat) {
+  const val = parseInt(document.getElementById('cap-' + cat).value);
+  if (isNaN(val)) { toast('Invalid value', 'error'); return; }
+  const caps = { ...(config.category_confidence_caps || {}) };
+  caps[cat] = val;
+  await patchConfig({ category_confidence_caps: caps });
+  toast(`${cat} capped at ${val}%`);
+}
+
+async function removeCap(cat) {
+  const caps = { ...(config.category_confidence_caps || {}) };
+  caps[cat] = null;
+  await patchConfig({ category_confidence_caps: caps });
+  await loadConfig();
+  toast(`${cat} uncapped`);
+}
+
+async function addCap() {
+  const cat = document.getElementById('f-cap-category').value.trim();
+  const val = parseInt(document.getElementById('f-cap-value').value);
+  if (!cat || isNaN(val)) { toast('Fill in category and value', 'error'); return; }
+  const caps = { ...(config.category_confidence_caps || {}) };
+  caps[cat] = val;
+  await patchConfig({ category_confidence_caps: caps });
+  document.getElementById('f-cap-category').value = '';
+  document.getElementById('f-cap-value').value = '';
+  await loadConfig();
+  toast(`${cat} capped at ${val}%`);
+}
+
+async function addCapNull() {
+  const cat = document.getElementById('f-cap-category').value.trim();
+  if (!cat) { toast('Fill in category', 'error'); return; }
+  const caps = { ...(config.category_confidence_caps || {}) };
+  caps[cat] = null;
+  await patchConfig({ category_confidence_caps: caps });
+  document.getElementById('f-cap-category').value = '';
+  await loadConfig();
+  toast(`${cat} uncapped`);
+}
+
+async function saveScope() {
+  const pattern = document.getElementById('f-scope-pattern').value;
+  const small = parseInt(document.getElementById('f-scope-small').value);
+  const medium = parseInt(document.getElementById('f-scope-medium').value);
+  let values;
+  try { values = JSON.parse(document.getElementById('f-scope-values').value); } catch(e) { toast('Invalid JSON in scope values', 'error'); return; }
+  await patchConfig({ scope_prefix_pattern: pattern, scope_word_thresholds: { small, medium }, scope_prefix_values: values });
+  toast('Scope settings saved');
+}
+
+async function saveThresholds() {
+  const t1Min = parseInt(document.getElementById('f-t1-min').value);
+  const t2Min = parseInt(document.getElementById('f-t2-min').value);
+  const t3Below = parseInt(document.getElementById('f-t3-below').value);
+  if (isNaN(t1Min) || isNaN(t2Min) || isNaN(t3Below)) { toast('All thresholds must be numbers', 'error'); return; }
+  if (t1Min < 0 || t1Min > 100 || t2Min < 0 || t2Min > 100 || t3Below < 0 || t3Below > 100) { toast('Thresholds must be 0-100', 'error'); return; }
+  await patchConfig({ threshold_t1_min: t1Min, threshold_t2_min: t2Min, threshold_t3_always_below: t3Below });
+  toast(`Thresholds saved: T1≥${t1Min} | T2≥${t2Min} | T3<${t3Below}`);
+}
+
+async function saveT1() {
+  const url = document.getElementById('f-t1-url').value;
+  const model = document.getElementById('f-t1-model').value;
+  const maxTokens = parseInt(document.getElementById('f-t1-max-tokens').value);
+  const t1 = config.tier_backends?.T1 || {};
+  t1.url = url; t1.model = model; t1.max_prompt_tokens = maxTokens;
+  t1.enabled = config.tier_backends?.T1?.enabled ?? true;
+  await patchConfig({ tier_backends: { ...(config.tier_backends || {}), T1: t1 } });
+  toast('T1 settings saved');
+}
+
+function renderT2Gateways() {
+  const t2 = config.tier_backends?.T2 || {};
+  const gateways = t2.gateways || [];
+  const container = document.getElementById('t2-gateways');
+  if (gateways.length === 0) { container.innerHTML = '<p style="color:#8b949e;font-size:0.8rem;">No T2 gateways configured.</p>'; return; }
+  container.innerHTML = gateways.map(g => `
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">${g.name} ${g.enabled === false ? '<span style="color:#da3633;">(disabled)</span>' : ''}</div>
+        <small>${g.url} | ${g.type} | weight: ${g.weight}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <div class="switch ${g.enabled !== false ? 'on' : ''}" data-tier="T2" data-key="${g.name}"></div>
+        <button class="btn btn-danger" style="padding:4px 8px;font-size:0.7rem;" onclick="removeT2Gateway('${g.name}')">Remove</button>
+      </div>
+    </div>`).join('');
+  container.querySelectorAll('.switch').forEach(el => {
+    el.addEventListener('click', async () => {
+      const isOn = el.classList.toggle('on');
+      await api('/api/tiers/toggle', 'POST', { tier: 'T2', key: el.dataset.key, enabled: isOn });
+      await loadConfig();
+    });
+  });
+}
+
+async function addT2Gateway() {
+  const name = prompt('Gateway name:', 'New Gateway'); if (!name) return;
+  const url = prompt('URL:', 'https://api.example.com/v1'); if (!url) return;
+  const type = prompt('Type (openrouter, nvidia, nous, omniroute, custom):', 'custom'); if (!type) return;
+  const apiKeyEnv = prompt('API key env var name (or leave empty):', '');
+  const gateway = { name, url, type, api_key_env: apiKeyEnv || undefined, weight: 1.0, enabled: true };
+  await api('/api/tiers/add-provider', 'POST', { tier: 'T2', provider: gateway });
+  await loadConfig();
+  toast(`Gateway "${name}" added`);
+}
+
+async function removeT2Gateway(name) {
+  if (!confirm(`Remove gateway "${name}"?`)) return;
+  await api('/api/tiers/remove-provider', 'POST', { tier: 'T2', name });
+  await loadConfig();
+  toast(`Gateway "${name}" removed`);
+}
+
+function renderT3Providers() {
+  const t3 = config.tier_backends?.T3 || {};
+  const providers = t3.providers || [];
+  const container = document.getElementById('t3-providers');
+  if (providers.length === 0) { container.innerHTML = '<p style="color:#8b949e;font-size:0.8rem;">No T3 providers configured. Add one when you get an API key.</p>'; return; }
+  container.innerHTML = providers.map(p => `
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">${p.name} ${p.enabled === false ? '<span style="color:#da3633;">(disabled)</span>' : ''}</div>
+        <small>${p.url} | model: ${p.model} | key: ${p.api_key_env || 'none'} | max tokens: ${p.max_prompt_tokens}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <div class="switch ${p.enabled !== false ? 'on' : ''}" data-tier="T3" data-key="${p.name}"></div>
+        <button class="btn btn-danger" style="padding:4px 8px;font-size:0.7rem;" onclick="removeT3Provider('${p.name}')">Remove</button>
+      </div>
+    </div>`).join('');
+  container.querySelectorAll('.switch').forEach(el => {
+    el.addEventListener('click', async () => {
+      const isOn = el.classList.toggle('on');
+      await api('/api/tiers/toggle', 'POST', { tier: 'T3', key: el.dataset.key, enabled: isOn });
+      await loadConfig();
+    });
+  });
+}
+
+async function addT3Provider() {
+  const name = prompt('Provider name:', 'New Provider'); if (!name) return;
+  const url = prompt('API URL:', 'https://api.example.com/v1'); if (!url) return;
+  const type = prompt('Type (grok, solar, openai, etc.):', 'custom'); if (!type) return;
+  const apiKeyEnv = prompt('API key env var name (e.g. GROK_API_KEY):', '');
+  const model = prompt('Model name:', 'gpt-4');
+  const maxTokens = prompt('Max tokens:', '32000');
+  const provider = { name, url, type, api_key_env: apiKeyEnv || undefined, model: model || 'gpt-4', max_prompt_tokens: parseInt(maxTokens) || 32000, enabled: true };
+  await api('/api/tiers/add-provider', 'POST', { tier: 'T3', provider });
+  await loadConfig();
+  toast(`Provider "${name}" added`);
+}
+
+async function removeT3Provider(name) {
+  if (!confirm(`Remove provider "${name}"?`)) return;
+  await api('/api/tiers/remove-provider', 'POST', { tier: 'T3', name });
+  await loadConfig();
+  toast(`Provider "${name}" removed`);
+}
+
+async function renderDiff() {
+  const diff = await api('/api/config/diff');
+  const el = document.getElementById('config-diff');
+  if (diff.diffs.length === 0) { el.textContent = 'All config values match defaults. No customizations applied yet.'; return; }
+  el.textContent = JSON.stringify(diff.diffs, null, 2);
+}
+
+async function runTest() {
+  const task = document.getElementById('f-test-task').value.trim();
+  if (!task) { toast('Enter a task description', 'error'); return; }
+  const ctxRaw = document.getElementById('f-test-context').value.trim();
+  let context = null;
+  if (ctxRaw) { try { context = JSON.parse(ctxRaw); } catch(e) { toast('Invalid context JSON', 'error'); return; } }
+  const result = await api('/api/assess', 'POST', { task, context });
+  const container = document.getElementById('test-results');
+  container.innerHTML = `<div class="result-item ${result.tier}">
+    <div><span class="tier" style="color:${result.tier==='T1'?'#238636':result.tier==='T2'?'#1f6feb':result.tier==='T3'?'#da3633':'#d29922'}">→ ${result.tier}</span> <span class="conf">${result.confidence}% confidence</span></div>
+    <div class="rationale">${result.rationale}</div>
+    <div style="margin-top:4px;font-size:0.75rem;color:#8b949e;">Categories: ${result.matched_categories?.join(', ')||'none'}</div>
+  </div>`;
+}
+
+async function runBatch() {
+  const raw = document.getElementById('f-batch-tasks').value.trim();
+  if (!raw) { toast('Enter tasks, one per line', 'error'); return; }
+  const tasks = raw.split('\n').map(t => t.trim()).filter(Boolean);
+  const results = await api('/api/assess/batch', 'POST', { tasks });
+  const container = document.getElementById('batch-results');
+  container.innerHTML = results.results.map(r => {
+    const color = r.tier==='T1'?'#238636':r.tier==='T2'?'#1f6feb':r.tier==='T3'?'#da3633':'#d29922';
+    return `<div class="result-item ${r.tier}"><div><span class="tier" style="color:${color}">→ ${r.tier}</span> <span class="conf">${r.confidence}%</span> <span style="color:#8b949e;font-size:0.75rem;">${r.matched_categories?.join(', ')||''}</span></div><div class="rationale">${r.rationale}</div></div>`;
+  }).join('');
+}
+
+async function refreshLog() {
+  const data = await api('/api/learning-log?limit=50');
+  logEntries = data.entries;
+  renderLogStats();
+  renderLogTable();
+}
+
+async function renderLogStats() {
+  const stats = await api('/api/learning-log/stats');
+  document.getElementById('log-total').textContent = stats.total_entries || 0;
+  document.getElementById('log-t1').textContent = stats.by_tier.T1 || 0;
+  document.getElementById('log-t2').textContent = stats.by_tier.T2 || 0;
+  document.getElementById('log-t3').textContent = stats.by_tier.T3 || 0;
+  document.getElementById('log-ask').textContent = stats.by_tier.ASK || 0;
+  document.getElementById('log-worked').textContent = stats.by_outcome?.worked || 0;
+  document.getElementById('log-failed').textContent = stats.by_outcome?.failed || 0;
+}
+
+function renderLogTable() {
+  const tbody = document.getElementById('log-table');
+  if (logEntries.length === 0) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;">No entries yet — run some tasks through the optimiser.</td></tr>'; return; }
+  tbody.innerHTML = logEntries.slice().reverse().map(e => {
+    const outcome = e.outcome || {};
+    const date = e.timestamp ? new Date(e.timestamp).toLocaleString() : '-';
+    const task = (e.task || '').slice(0, 50);
+    const tier = e.tier || '-';
+    const conf = e.confidence || '-';
+    const out = outcome.outcome || '-';
+    const quality = outcome.quality || '-';
+    const tierColor = tier==='T1'?'#238636':tier==='T2'?'#1f6feb':tier==='T3'?'#da3633':'#8b949e';
+    return `<tr><td style="font-size:0.75rem;white-space:nowrap;">${date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${task}</td><td><span style="color:${tierColor};font-weight:600;">${tier}</span></td><td>${conf}%</td><td>${out}</td><td>${quality}</td></tr>`;
+  }).join('');
+}
+
+async function clearLog() {
+  if (!confirm('Clear the entire learning log? This cannot be undone.')) return;
+  await api('/api/learning-log/clear', 'POST');
+  logEntries = [];
+  await refreshLog();
+  toast('Learning log cleared');
+}
+
+// ── Analytics ────────────────────────────────────────────────────────────────────
+
+function loadAnalytics() {
+  return Promise.all([
+    api('/api/analytics/overview'),
+    api('/api/analytics/time-series?days=30'),
+    api('/api/analytics/confidence-histogram'),
+    api('/api/analytics/by-category'),
+    api('/api/analytics/effectiveness'),
+  ]).then(([data, timeline, histogram, byCat, effectiveness]) => {
+    renderAnalyticsOverview(data);
+    renderTierTrendChart(timeline.series);
+    renderConfidenceHistogram(histogram);
+    renderCategoryBreakdown(byCat.by_category);
+    renderEffectiveness(effectiveness);
+  }).catch(e => console.error('Analytics error:', e));
+}
+
+function renderAnalyticsOverview(data) {
+  const stats = document.getElementById('analytics-stats');
+  if (!stats) return;
+  const t = data.total_assessments || 0;
+  const tr = data.by_tier || {};
+  const er = data.effectiveness || {};
+  const cr = data.confidence_range || {};
+  stats.innerHTML = `
+    <div class="stat"><div class="val">${t}</div><div class="lbl">Total</div></div>
+    <div class="stat"><div class="val" style="color:#238636">${tr.T1||0}</div><div class="lbl">T1</div></div>
+    <div class="stat"><div class="val" style="color:#1f6feb">${tr.T2||0}</div><div class="lbl">T2</div></div>
+    <div class="stat"><div class="val" style="color:#da3633">${tr.T3||0}</div><div class="lbl">T3</div></div>
+    <div class="stat"><div class="val" style="color:#d29922">${tr.ASK||0}</div><div class="lbl">ASK</div></div>
+    <div class="stat"><div class="val">${cr.avg||0}%</div><div class="lbl">Avg Conf</div></div>
+    <div class="stat"><div class="val" style="color:#238636">${er.success_rate||0}%</div><div class="lbl">Success</div></div>
+    <div class="stat"><div class="val" style="color:#8b949e">${er.total_worked||0}</div><div class="lbl">Worked</div></div>`;
+}
+
+function renderTierTrendChart(series) {
+  const ctx = document.getElementById('chart-tier-trend'); if (!ctx || !series?.length) return;
+  if (analyticsCharts.tierTrend) analyticsCharts.tierTrend.destroy();
+  analyticsCharts.tierTrend = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: series.map(s=>s.date), datasets: [
+      { label: 'T1', data: series.map(s=>s.T1), backgroundColor: '#238636', borderRadius: 2 },
+      { label: 'T2', data: series.map(s=>s.T2), backgroundColor: '#1f6feb', borderRadius: 2 },
+      { label: 'T3', data: series.map(s=>s.T3), backgroundColor: '#da3633', borderRadius: 2 },
+      { label: 'ASK', data: series.map(s=>s.ASK||0), backgroundColor: '#d29922', borderRadius: 2 },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#8b949e', maxTicksLimit: 15, font: { size: 10 } }, grid: { color: '#21262d' } }, y: { beginAtZero: true, ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } } } }
+  });
+}
+
+function renderConfidenceHistogram(histogram) {
+  const ctx = document.getElementById('chart-confidence-hist'); if (!ctx || !histogram?.buckets?.length) return;
+  if (analyticsCharts.confHist) analyticsCharts.confHist.destroy();
+  analyticsCharts.confHist = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: histogram.buckets.map(b=>b.range), datasets: [{ label: 'Assessments', data: histogram.buckets.map(b=>b.count), backgroundColor: histogram.buckets.map(b=>b.high<60?'#da3633':b.low>=80?'#238636':'#1f6feb'), borderRadius: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.raw} assessments` } } }, scales: { x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } }, y: { beginAtZero: true, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } } } }
+  });
+}
+
+function renderCategoryBreakdown(categories) {
+  const ctx = document.getElementById('chart-category-breakdown'); if (!ctx || !categories || !Object.keys(categories).length) return;
+  if (analyticsCharts.catBreakdown) analyticsCharts.catBreakdown.destroy();
+  const sorted = Object.entries(categories).sort((a,b)=>b[1].total-a[1].total);
+  analyticsCharts.catBreakdown = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: sorted.map(([cat])=>cat.replace(/_/g,' ').slice(0,20)), datasets: [
+      { label: 'T1', data: sorted.map(([,d])=>d.by_tier?.T1||0), backgroundColor: '#238636', borderRadius: 2 },
+      { label: 'T2', data: sorted.map(([,d])=>d.by_tier?.T2||0), backgroundColor: '#1f6feb', borderRadius: 2 },
+      { label: 'T3', data: sorted.map(([,d])=>d.by_tier?.T3||0), backgroundColor: '#da3633', borderRadius: 2 },
+    ]},
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } }, scales: { x: { beginAtZero: true, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } } } }
+  });
+}
+
+function renderEffectiveness(effectiveness) {
+  const el = document.getElementById('analytics-effectiveness'); if (!el) return;
+  const byTier = effectiveness.by_tier || {};
+  const overall = effectiveness;  // backend returns effectiveness at top level
+  el.innerHTML = `<table style="margin-top:8px;"><thead><tr><th>Tier</th><th>Total</th><th>Worked</th><th>Partial</th><th>Failed</th><th>Escalated</th><th>Success%</th><th>Acceptable%</th></tr></thead><tbody>
+    ${Object.entries(byTier).map(([tier,s])=>`<tr><td><span style="color:${tier==='T1'?'#238636':tier==='T2'?'#1f6feb':tier==='T3'?'#da3633':'#8b949e'};font-weight:600;">${tier}</span></td><td>${s.total_assessments}</td><td style="color:#238636">${s.worked}</td><td style="color:#d29922">${s.partial}</td><td style="color:#da3633">${s.failed}</td><td style="color:#d29922">${s.escalated}</td><td>${s.success_rate}%</td><td>${s.acceptable_rate}%</td></tr>`).join('')}
+    <tr style="border-top:2px solid #30363d;font-weight:600;"><td>Overall</td><td>${overall.total_with_outcome||0}</td><td style="color:#238636">${overall.worked_count||0}</td><td>-</td><td>-</td><td>-</td><td style="color:#238636">${overall.success_rate||0}%</td><td>-</td></tr></tbody></table>`;
+}
+
+// ── Categories tab ──────────────────────────────────────────────────────────────
+
+async function loadCategories() {
+  try {
+    const data = await api('/api/analytics/by-category');
+    const byCat = data.by_category || {};
+    const catTable = document.getElementById('cat-table');
+    const catStats = document.getElementById('cat-stats');
+    if (!catTable || !catStats) return;
+
+    const entries = Object.entries(byCat).sort((a, b) => b[1].total - a[1].total);
+    if (entries.length === 0) {
+      catTable.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8b949e;">No category data yet</td></tr>';
+      catStats.innerHTML = '<div class="stat"><div class="val">0</div><div class="lbl">Categories</div></div>';
+      return;
+    }
+
+    catStats.innerHTML = `
+      <div class="stat"><div class="val">${entries.length}</div><div class="lbl">Categories</div></div>
+      <div class="stat"><div class="val">${entries.reduce((s,[,v])=>s+v.total,0)}</div><div class="lbl">Total Assays</div></div>
+    `;
+
+    catTable.innerHTML = entries.map(([cat, d]) => {
+      const domTier = d.dominant_tier || '-';
+      const tierColor = domTier==='T1'?'#238636':domTier==='T2'?'#1f6feb':domTier==='T3'?'#da3633':'#8b949e';
+      return `<tr>
+        <td style="font-family:monospace;font-size:0.75rem;">${cat.replace(/_/g,' ')}</td>
+        <td>${d.total}</td>
+        <td>${d.avg_confidence?.toFixed(0)||'-'}%</td>
+        <td>${d.min_confidence||'-'}</td>
+        <td>${d.max_confidence||'-'}</td>
+        <td><span style="color:${tierColor};font-weight:600;">${domTier}</span></td>
+        <td style="color:#238636">${d.by_tier?.T1||0}</td>
+        <td style="color:#1f6feb">${d.by_tier?.T2||0}</td>
+        <td style="color:#da3633">${d.by_tier?.T3||0}</td>
+        <td style="color:#d29922">${d.by_tier?.ASK||0}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    console.error('Categories error:', e);
+    toast('Failed to load categories', 'error');
+  }
+}
+
+function loadOllamaStatus() {
+  return api('/api/ollama/status').then(status => { ollamaStatus = status; renderOllamaStatus(status); }).catch(e => { console.error('Ollama error:', e); toast('Failed to load Ollama status', 'error'); });
+}
+
+function renderOllamaStatus(status) {
+  const container = document.getElementById('ollama-status');
+  if (!container || !status) return;
+  const running = status.server_running;
+  const models = status.models || [];
+  const memInfo = status.memory_info || {};
+  const controlMethod = status.control_method || 'unknown';
+  const version = status.version || 'unknown';
+  const error = status.error;
+  const host = status.host || 'unknown';
+  const apiReachable = status.api_reachable;
+  const modelCount = memInfo.model_count || 0;
+  const totalSizeGb = (memInfo.total_model_size_gb || 0).toFixed(2);
+  const totalBytes = memInfo.total_model_size_bytes || 0;
+  const defaultModel = status.default_model || 'qwen2.5:3b';
+  const hostParts = host.split(':');
+  const hostAddr = hostParts[0] || '192.168.1.10';
+  const hostPort = hostParts[1] || '8081';
+
+  container.innerHTML =
+    '<div class="grid" style="margin-bottom:16px;">' +
+      '<div class="card">' +
+        '<h2>Server Status <span class="badge ' + (running ? 'badge-green' : 'badge-red') + '">' + (running ? 'RUNNING' : 'STOPPED') + '</span></h2>' +
+        '<div style="font-size:0.8rem;color:#8b949e;margin:4px 0;">' +
+          '<div>Host: ' + host + '</div>' +
+          '<div>Control method: ' + controlMethod + '</div>' +
+          '<div>Version: ' + version + '</div>' +
+          '<div>API reachable: ' + (apiReachable ? 'Yes' : 'No') + '</div>' +
+          (error ? '<div style="color:#da3633;margin-top:8px;">Error: ' + error + '</div>' : '') +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px;">' +
+          '<button class="btn ' + (running ? 'btn-danger' : 'btn-success') + '" onclick="ollamaAction(\'start\')" ' + (running ? 'disabled' : '') + '>Start Server</button>' +
+          '<button class="btn ' + (running ? 'btn-success' : 'btn-danger') + '" onclick="ollamaAction(\'stop\')" ' + (running ? '' : 'disabled') + '>Stop Server</button>' +
+          '<button class="btn btn-primary" onclick="ollamaAction(\'restart\')" ' + (running ? '' : 'disabled') + '>Restart</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<h2>Memory <span class="badge badge-blue">' + totalSizeGb + ' GB</span></h2>' +
+        '<div style="font-size:0.8rem;color:#8b949e;"><div>Models: ' + modelCount + '</div><div>Total size: ' + totalSizeGb + ' GB</div><div>Bytes: ' + totalBytes + '</div></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<h2>Models (' + models.length + ')</h2>' +
+      (models.length === 0 ? '<p style="color:#8b949e;font-size:0.8rem;">No models found. Pull one below.</p>' : '') +
+      '<table style="margin-top:8px;"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>' +
+      '<tbody>' + models.map(function(m) {
+        return '<tr><td style="font-family:monospace;font-size:0.8rem;">' + m.name + '</td>' +
+          '<td style="font-family:monospace;font-size:0.8rem;">' + (m.size || (m.digest ? m.digest.slice(0, 12) + '...' : '')) + '</td>' +
+          '<td style="font-size:0.75rem;color:#8b949e;">' + (m.modified_at ? m.modified_at.slice(0, 10) : '-') + '</td>' +
+          '<td><button class="btn btn-ghost" style="padding:2px 8px;font-size:0.7rem;" onclick="ollamaPull(\'' + m.name.replace(/'/g, "\\'") + '\')">Re-pull</button></td></tr>';
+      }).join('') + '</tbody>' +
+      '</table>' +
+    '</div>' +
+    '<div class="card">' +
+      '<h2>Pull Model</h2>' +
+      '<div class="form-row"><label>Model name</label><input type="text" id="ollama-pull-model" value="' + defaultModel.replace(/"/g, '&quot;') + '" placeholder="qwen2.5:3b"></div>' +
+      '<button class="btn btn-primary" onclick="ollamaPull(document.getElementById(\'ollama-pull-model\').value)">Pull Model</button>' +
+      '<div id="ollama-pull-status" style="margin-top:8px;font-size:0.8rem;color:#8b949e;"></div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<h2>Ollama Control Config</h2>' +
+      '<div class="form-row"><label>Host</label><input type="text" id="ollama-f-host" value="' + hostAddr.replace(/"/g, '&quot;') + '"></div>' +
+      '<div class="form-row"><label>Port</label><input type="number" id="ollama-f-port" value="' + hostPort + '"></div>' +
+      '<div class="form-row"><label>SSH User</label><input type="text" id="ollama-f-ssh-user" value="warpuppy"></div>' +
+      '<div class="form-row"><label>Default Model</label><input type="text" id="ollama-f-default-model" value="' + defaultModel.replace(/"/g, '&quot;') + '"></div>' +
+      '<div class="form-row"><label>Control Method</label><select id="ollama-f-control-method">' +
+        '<option value="auto"' + (controlMethod === 'auto' ? ' selected' : '') + '>Auto</option>' +
+        '<option value="api"' + (controlMethod === 'api' ? ' selected' : '') + '>Direct API</option>' +
+        '<option value="ssh"' + (controlMethod === 'ssh' ? ' selected' : '') + '>SSH only</option>' +
+      '</select></div>' +
+      '<button class="btn btn-success" onclick="saveOllamaConfig()">Save Ollama Config</button>' +
+    '</div>';
+}
+
+async function ollamaAction(action) {
+  const btn = document.querySelector(`button[onclick="ollamaAction('${action}')"]`); if (btn) btn.disabled = true;
+  try {
+    const result = await api(`/api/ollama/${action}`, 'POST');
+    toast(`Ollama ${action}: ${result.message||'OK'}`);
+    await loadOllamaStatus();
+  } catch (e) { toast(`Ollama ${action} failed: ${e.message}`, 'error'); }
+  if (btn) btn.disabled = false;
+}
+
+async function ollamaPull(modelName) {
+  if (!modelName) { toast('Enter a model name', 'error'); return; }
+  const statusEl = document.getElementById('ollama-pull-status');
+  if (statusEl) statusEl.textContent = `Pulling ${modelName}...`;
+  try {
+    const result = await api('/api/ollama/pull', 'POST', { model: modelName });
+    if (statusEl) statusEl.textContent = result.message || `Pull complete for ${modelName}`;
+    if (result.progress?.length > 0) statusEl.textContent += ' | ' + result.progress[0].slice(0, 200);
+    await loadOllamaStatus();
+    toast(`Model ${modelName}: ${result.message||'done'}`);
+  } catch (e) { if (statusEl) statusEl.textContent = `Pull failed: ${e.message}`; toast(`Pull failed: ${e.message}`, 'error'); }
+}
+
+async function saveOllamaConfig() {
+  const host = document.getElementById('ollama-f-host')?.value || '192.168.1.10';
+  const port = document.getElementById('ollama-f-port')?.value || '8081';
+  const sshUser = document.getElementById('ollama-f-ssh-user')?.value || 'warpuppy';
+  const defaultModel = document.getElementById('ollama-f-default-model')?.value || 'qwen2.5:3b';
+  const controlMethod = document.getElementById('ollama-f-control-method')?.value || 'auto';
+  try {
+    await api('/api/ollama/config', 'POST', { host, port, ssh_user: sshUser, default_model: defaultModel, control_method: controlMethod });
+    toast('Ollama config saved');
+    await loadOllamaStatus();
+  } catch (e) { toast('Failed to save Ollama config: ' + e.message, 'error'); }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await loadConfig();
+  renderGeneralStats();
+  refreshLog();
+  await loadAnalytics();
+  await loadOllamaStatus();
+  setInterval(async () => { await loadAnalytics(); }, 60000);
+  setInterval(async () => { await loadOllamaStatus(); }, 15000);
+  setInterval(() => refreshLog(), 30000);
+}
+
+function renderGeneralStats() {
+  const stats = document.getElementById('stats');
+  if (!stats) return;
+  const t1 = config.threshold_t1_min ?? 80;
+  const t2 = config.threshold_t2_min ?? 60;
+  const t3 = config.threshold_t3_always_below ?? 60;
+  stats.innerHTML = `
+    <div class="stat"><div class="val">${config.enabled !== false ? 'ON' : 'OFF'}</div><div class="lbl">Optimiser</div></div>
+    <div class="stat"><div class="val" style="color:#238636">${t1}</div><div class="lbl">T1 Threshold</div></div>
+    <div class="stat"><div class="val" style="color:#1f6feb">${t2}</div><div class="lbl">T2 Threshold</div></div>
+    <div class="stat"><div class="val" style="color:#da3633">${t3}</div><div class="lbl">T3 Threshold</div></div>
+    <div class="stat"><div class="val">${config.hybrid_band_enabled !== false ? 'AUTO' : 'ASK'}</div><div class="lbl">Hybrid Band</div></div>
+  `;
+}
+init().catch(e => { console.error('Init error:', e); toast('Init error: ' + e.message, 'error'); });
+</script>
+</body>
+</html>
