@@ -38,12 +38,95 @@ from token_optimiser.router import classify_itil
 # monica_integration imported lazily inside run_boa to avoid circular imports
 # when monica_integration imports lightweight BOA classifiers for governance.
 
-# ── Seat definitions ──────────────────────────────────────────────────────────
+def _ask_prompt(seat: Dict[str, str], question: str, domain: str) -> str:
+    """Build a seat prompt that cannot be hijacked by the persona framing.
+
+    WHY THIS EXISTS — a measured failure, not a guess. Six consecutive BOA runs
+    on a drone-physics question returned essays about JWT authentication,
+    service meshes and the CAP theorem. The control run stated plainly "You are
+    six expert advisers on DRONE PROPULSION AND BATTERY PHYSICS, not software
+    architects... Do not discuss authentication, APIs, microservices, or
+    security", routed to T3 Grok, and still answered with Fowler (2002) on
+    microservices. The question arrived intact — every answer quoted it back
+    verbatim — and was then answered by something else.
+
+    Diagnosis: the old prompt was `framing + question`, i.e. the persona
+    instruction came FIRST and dominated. A small-to-mid model completes a
+    system-design framing with a system-design essay regardless of what follows.
+    Strength of model does not help; T3 failed identically to T2.
+
+    Fixes, each targeting that mechanism:
+      1. The QUESTION comes first, so it is the highest-salience token span.
+      2. The domain is stated explicitly and derived from the question.
+      3. The persona is scoped to a LENS on that domain, never a replacement
+         topic ("as the Architect, examine X" not "you are an architect").
+      4. An explicit answer contract with the required first token, so a
+         topical answer is structurally cheaper than a drift.
+      5. An explicit off-topic prohibition naming the observed drift, since
+         stating the ban alone proved insufficient.
+    """
+    return (
+        f"QUESTION (answer this, and only this):\n{question}\n\n"
+        f"DOMAIN: {domain}. Do not answer as a generalist; answer as a specialist "
+        f"in {domain}.\n\n"
+        f"YOUR ROLE: you are the {seat['name']} on an advisory board. "
+        f"{seat['focus']}\n"
+        f"Apply that role AS A LENS ON THE QUESTION ABOVE. The role shapes HOW you "
+        f"answer; it does not change WHAT the question is about.\n\n"
+        f"HARD RULES:\n"
+        f"- Your FIRST sentence must engage the specific question above. If you "
+        f"cannot engage it, say so and state what you would need.\n"
+        f"- Do NOT substitute a different topic. In particular do not discuss "
+        f"authentication, APIs, microservices, service meshes, or security "
+        f"unless the question above is about them.\n"
+        f"- Quote or reference the concrete figures, quantities or file names in "
+        f"the question. Generic advice that would apply to any question is a "
+        f"failed answer.\n"
+        f"- Be concise and specific. No preamble.\n"
+    )
+
+
+def _infer_domain(question: str) -> str:
+    """Best-effort domain label for the prompt, from the question's own words.
+
+    Deliberately keyword-based and legible. A clever classifier here would be
+    its own unreviewed system, and its failure would be invisible.
+    """
+    q = question.lower()
+    probes = (
+        (("prop", "rotor", "thrust", "rpm", "hover", "aerodynamic", "ct", "fom",
+          "figure of merit", "disc loading", "airfoil", "pitch", "quadrotor",
+          "multirotor", "momentum theory"), "multirotor propulsion and propeller aerodynamics"),
+        (("battery", "lipo", "li-ion", "peukert", "c-rate", "discharge", "cell",
+          "pack", "mah", "wh/kg", "energy density"), "battery and energy physics"),
+        (("flight time", "endurance", "payload", "sweet spot", "prop size"), "multirotor performance and flight-time prediction"),
+        (("token", "tier", "router", "routing", "optimiser", "t1", "t2", "t3",
+          "dispatch", "model selection"), "LLM routing and tier selection"),
+        (("itil", "incident", "change record", "service desk", "cab"), "ITIL service management practice"),
+        (("auth", "oauth", "token", "credential", "jwt"), "authentication and credential handling"),
+    )
+    for keys, label in probes:
+        if any(k in q for k in keys):
+            return label
+    return "the specific technical matter described in the question"
+
+
+def _ask_prompt_legacy(seat: Dict[str, str], question: str) -> str:
+    """The old framing-first prompt. Kept for A/B comparison and regression tests."""
+    return seat["framing"] + question
+
 
 SEATS: List[Dict[str, str]] = [
     {
         "id": "architect",
         "name": "Architect",
+        # `focus` is what the persona is a LENS on. It must describe HOW to think,
+        # never WHAT the topic is — the old `framing` did the latter, and that is
+        # what let the persona replace the question's subject entirely.
+        "focus": (
+            "Examine structural coherence, design trade-offs, and what will break "
+            "at scale. Ask what the pieces depend on and what should not be coupled."
+        ),
         "framing": (
             "You are the Architect on the Board of Advisors. Focus on system design, "
             "trade-offs, long-term maintainability, and structural coherence. "
@@ -53,6 +136,11 @@ SEATS: List[Dict[str, str]] = [
     {
         "id": "engineer",
         "name": "Engineer",
+        "focus": (
+            "Examine implementation practicality: what it takes to build, run, test "
+            "and maintain. Name concrete steps and call out anything that will not "
+            "work as written."
+        ),
         "framing": (
             "You are the Engineer on the Board of Advisors. Focus on implementation "
             "details, practicality, performance, and correctness. "
@@ -62,6 +150,11 @@ SEATS: List[Dict[str, str]] = [
     {
         "id": "researcher",
         "name": "Researcher",
+        "focus": (
+            "Examine evidence, precedents and measured data. Cite specific sources, "
+            "figures or standards where you can, and say plainly when evidence is "
+            "absent rather than filling the gap."
+        ),
         "framing": (
             "You are the Researcher on the Board of Advisors. Focus on evidence, "
             "precedents, benchmarks, and citations. Where possible, reference known "
@@ -72,6 +165,11 @@ SEATS: List[Dict[str, str]] = [
     {
         "id": "reviewer",
         "name": "Reviewer",
+        "focus": (
+            "Interrogate the proposal for risk: blind spots, edge cases, failure modes "
+            "and things that were assumed without checking. Be constructively "
+            "sceptical and specific."
+        ),
         "framing": (
             "You are the Reviewer on the Board of Advisors. Critically assess the "
             "proposal: identify risks, blind spots, edge cases, and failure modes. "
@@ -82,6 +180,10 @@ SEATS: List[Dict[str, str]] = [
     {
         "id": "budget",
         "name": "Budget (Token Optimiser)",
+        "focus": (
+            "Judge cost, routing and efficiency. Which tier (T1 local / T2 free / "
+            "T3 paid) fits the work, and what is the cheapest viable path?"
+        ),
         "framing": (
             "You are the Budget seat on the Board of Advisors (Token Optimiser). "
             "Focus on cost, routing, and efficiency. Which tier (T1/T2/T3) is "
@@ -93,6 +195,10 @@ SEATS: List[Dict[str, str]] = [
     {
         "id": "executive",
         "name": "Executive (Chair)",
+        "focus": (
+            "Weigh the seats' input and return one recommendation: what to do, in "
+            "what order, with what priority, and what must not be started."
+        ),
         "framing": (
             "You are the Executive Chair on the Board of Advisors. Synthesise the "
             "board's views into a single recommendation. Decide what to do, in what "
@@ -105,6 +211,68 @@ SEATS: List[Dict[str, str]] = [
 # ITIL classification now lives in router.py (classify_itil) — router assess() always runs it.
 # Governance from BOA/ITIL drives tier + swarm_recommendation decisions.
 # (imported at module top)
+
+def _on_topic(answer: str, question: str) -> Dict[str, Any]:
+    """Cheap drift check: did the seat engage the question it was given?
+
+    Not a judgement of answer quality — only of subject matter. This exists
+    because the persona-hijack failure was completely invisible in the output:
+    six seats "answered", the session reported success, and four of the answers
+    were about a different subject entirely.
+
+    Deliberately simple and legible. It flags for a human; it does not retry,
+    and it must never silently rewrite an answer.
+    """
+    if not answer:
+        return {"checked": False, "verdict": "no-answer"}
+
+    a = answer.lower()
+    q = question.lower()
+
+    # Terms the question actually uses; overlap implies engagement.
+    stop = {
+        "the", "a", "an", "of", "and", "or", "to", "in", "is", "it", "for", "on",
+        "should", "we", "our", "what", "how", "does", "do", "can", "with", "that",
+        "this", "be", "are", "was", "were", "by", "as", "at", "from",
+    }
+
+    def _terms(text: str):
+        out = set()
+        for w in text.replace("/", " ").replace("-", " ").replace(",", " ").split():
+            w = w.strip("?.!:;()\"'")
+            if len(w) > 3 and w not in stop and not w.isdigit():
+                out.add(w)
+        return out
+
+    q_terms = _terms(q)
+    a_terms = _terms(a)
+    if not q_terms:
+        return {"checked": False, "verdict": "no-comparable-terms"}
+
+    overlap = len(q_terms & a_terms)
+    ratio = overlap / len(q_terms)
+
+    # Known drift signatures observed in six consecutive runs.
+    drift_terms = ("microservice", "service mesh", "event bus", "kafka", "nats",
+                   "jwt", "oauth", "fido2", "owasp", "cap theorem", "token theft",
+                   "clock skew", "dora metric", "bounded context")
+    drifted = [t for t in drift_terms if t in a]
+
+    verdict = "on-topic"
+    if drifted and ratio < 0.15:
+        verdict = "DRIFT"
+    elif ratio < 0.08:
+        verdict = "suspect-low-overlap"
+
+    return {
+        "checked": True,
+        "verdict": verdict,
+        "overlap": overlap,
+        "of_terms": len(q_terms),
+        "ratio": round(ratio, 3),
+        "drift_terms": drifted,
+    }
+
 
 def _generate_incident_id() -> str:
     """Generate a compact incident/problem/change ID."""
@@ -497,7 +665,10 @@ def decide_governance(task: str, context: Optional[Dict[str, Any]] = None, fast:
         # Keep the governance logging (even for fast programmatic calls)
         try:
             # Resolve relative to repo root (supports any clone dir name e.g. neo-light)
-            _repo_root = Path(__file__).resolve().parents[2]
+            # CHG-2026-032: was parents[2] (= ~/Projects), which wrote session
+            # logs and the governance trail into a SHARED parent directory
+            # alongside every other project. parents[1] is this repo root.
+            _repo_root = Path(__file__).resolve().parents[1]
             work_dir = Path(context.get("work_dir", str(_repo_root / "work/boa")))
             log_governance_decision(
                 question=task,
@@ -606,13 +777,15 @@ def _generate_seat_answer(seat: Dict[str, str], question: str, tier: str) -> Dic
     mock backend from mock_backends.py.
     """
     backend = _resolve_backend()
-    prompt = seat["framing"] + question
+    domain = _infer_domain(question)
+    prompt = _ask_prompt(seat, question, domain)
 
     if backend == "mock":
         return {
             "seat_id": seat["id"],
             "seat_name": seat["name"],
             "tier": tier,
+            "domain": domain,
             "prompt_preview": prompt[:120],
             "answer": (
                 f"[{seat['name']} — {tier} mock] Response for: {question[:80]}... "
@@ -629,28 +802,64 @@ def _generate_seat_answer(seat: Dict[str, str], question: str, tier: str) -> Dic
         "T3": T3MockBackend,
     }
     backend_cls = backend_map.get(tier, T2MockBackend)
+    degraded = False
     try:
         result = backend_cls().generate(prompt, seat_id=seat["id"])
         answer = result.get("response", "")
         model = result.get("model", "unknown")
         quality = result.get("quality", "unknown")
+        # A backend that returns no text has failed, even without raising. The
+        # old code treated that as success and the seat then contributed an
+        # empty vote to the synthesis without anyone noticing.
+        if not isinstance(answer, str) or not answer.strip():
+            degraded = True
+            answer = ""
     except Exception as e:
-        # Graceful fallback to mock if backend fails
+        degraded = True
+        answer = ""
+        model = "error"
+        quality = "unavailable"
+
+    if degraded:
+        # Fall back to a legacy-framing retry before giving up. The new prompt
+        # is the fix for persona hijack, but a seat that cannot reach its
+        # backend at all is a different failure and deserves one more attempt.
+        try:
+            result = backend_cls().generate(
+                seat["framing"] + question, seat_id=seat["id"]
+            )
+            answer = result.get("response", "")
+            model = result.get("model", "unknown")
+            if isinstance(answer, str) and answer.strip():
+                degraded = False
+                quality = result.get("quality", "unknown")
+        except Exception:
+            pass
+
+    if degraded:
+        # Record the failure as data rather than fabricating an answer. A
+        # placeholder that looks like a seat response corrupts the synthesis:
+        # six "seats" answered, four were drift, two were placeholders, and
+        # nothing in the output said so.
         answer = (
-            f"[{seat['name']} — {tier} live] Backend error ({e}), "
-            f"falling back to mock. Response for: {question[:80]}..."
+            f"[{seat['name']} — SEAT UNAVAILABLE] Backend did not return an answer "
+            f"(tier {tier}). This seat contributed NO input to the synthesis. Do "
+            f"not read this as agreement or dissent."
         )
-        model = "fallback"
-        quality = "fallback"
+        model = "unavailable"
+        quality = "unavailable"
 
     return {
         "seat_id": seat["id"],
         "seat_name": seat["name"],
         "tier": tier,
+        "domain": domain,
+        "on_topic_check": _on_topic(answer, question),
         "prompt_preview": prompt[:120],
         "answer": answer,
         "model": model,
         "quality": quality,
+        "degraded": degraded,
         "simulated": False,
         "backend": backend,
     }
@@ -674,6 +883,78 @@ def _extract_key_points(answer: str, max_chars: int = 120) -> List[str]:
         if len(sent) > 20:
             points.append(sent[:max_chars].rstrip() + ("..." if len(sent) > max_chars else ""))
     return points[:2]  # max 2 key points per seat
+
+
+def _governance_statement(
+    *,
+    question: str,
+    tier: str,
+    confidence: int,
+    itil_classification: Dict[str, Any],
+    tos_probe: Dict[str, Any],
+    swarm_governance: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> str:
+    """Option B (CHG-2026-032): state what was COMPUTED, never what was ADVISED.
+
+    Replaces `_synthesise`, which built a paragraph from six seat answers. Those
+    answers came from `mock_backends.py` — hardcoded strings with no network
+    call behind them — so the old synthesis was a confident essay assembled from
+    fixtures. Its failure mode was invisible: correct shape, plausible prose,
+    exit 0.
+
+    This states only things that were actually computed, and says explicitly that
+    no advisory board ran. It is deliberately not styled like a recommendation.
+    """
+    itil = itil_classification.get("classification", "unknown")
+    prefix = f"{itil_classification.get('prefix', '')}{'' if itil_classification.get('prefix') else ''}"
+    chg = "a CHG number is required" if itil_classification.get("requires_chg_number") else "no CHG number required"
+
+    parts: List[str] = [
+        f"GOVERNANCE DECISION (no advisory board ran; there are no advisory seats). "
+        f"Route this to tier {tier} at {confidence}% confidence. "
+        f"ITIL classification: {itil} (confidence "
+        f"{int(100 * float(itil_classification.get('confidence', 0.0)))}%, {chg})."
+    ]
+
+    matched = decision.get("matched_categories") or []
+    if matched:
+        parts.append(f"Matched categories: {', '.join(str(m) for m in matched)}.")
+
+    if tos_probe:
+        recs = tos_probe.get("recommended") or []
+        gws = tos_probe.get("gateways") or {}
+        live = [g for g, v in gws.items() if isinstance(v, dict) and v.get("has_token")]
+        parts.append(
+            f"TOS probe: {len(recs)} recommended model(s); "
+            f"{len(live)} of {len(gws)} gateway/gateways report a credential."
+        )
+
+    sg = swarm_governance or {}
+    if sg.get("governed"):
+        rec = sg.get("recommendation") or {}
+        parts.append(
+            f"Swarm governance: governed — recommended {rec.get('recommendation', 'unspecified')} "
+            f"at score {rec.get('score', '?')}."
+        )
+    elif sg:
+        parts.append("Swarm governance: not engaged by this question.")
+
+    rationale = decision.get("rationale")
+    if rationale:
+        parts.append(f"Router reasoning: {rationale}")
+
+    parts.append(
+        "This is a routing and classification result computed by the token "
+        "optimiser. It is NOT advice, opinion, or review from any model or "
+        "persona. The six advisory perspectives survive as a checklist in the "
+        "session log for the human to work through."
+    )
+    return " ".join(parts)
+
+
+def _governance_statement_placeholder() -> None:  # pragma: no cover
+    return None
 
 
 def _synthesise(
@@ -839,18 +1120,24 @@ def _write_session_log(
         lines.append(f"Decision logged to: `{governance_log_path}`")
         lines.append("")
 
-    lines.append("## Seat Answers")
+    # Option B (CHG-2026-032): the six perspectives survive as a CHECKLIST for
+    # the human to work through. They are NOT answers received from a model, and
+    # the heading must make that unmistakable — the original failure was
+    # fabricated content that looked like advice received.
+    lines.append("## Advisory Checklist — perspectives to consider (NOT advice received)")
+    lines.append("")
+    lines.append(
+        "No advisory seats exist. The board previously reported six seat answers; "
+        "they were hardcoded strings from `mock_backends.py` with no model call "
+        "behind them (CHG-2026-032). The six perspectives are retained as "
+        "structure for the human decision-maker."
+    )
+    lines.append("")
+    for seat in SEATS:
+        lines.append(f"- [ ] **{seat['name']}** — {seat['focus']}")
     lines.append("")
 
-    for ans in seat_answers:
-        lines.append(f"### {ans['seat_name']} (`{ans['seat_id']}`) — {ans['tier']}")
-        lines.append("")
-        lines.append(f"> Prompt: {ans['prompt_preview']}...")
-        lines.append("")
-        lines.append(ans["answer"])
-        lines.append("")
-
-    lines.append("## Synthesis")
+    lines.append("## Governance Decision")
     lines.append("")
     lines.append(synthesis)
     lines.append("")
@@ -894,8 +1181,9 @@ def run_boa(
         {
             "tier": str,
             "confidence": int,
-            "seat_answers": list[dict],
-            "synthesis": str,
+            "seat_answers": list[dict],   # always [] since Option B
+            "advisory_seats": int,       # always 0 since Option B
+            "synthesis": str,            # governance statement, not a board opinion
             "log_path": str,
             "decision": dict,   # raw routing decision
             "itil_classification": dict | None,
@@ -906,7 +1194,8 @@ def run_boa(
     """
     if work_dir is None:
         # Resolve relative to repo root (supports any clone dir name e.g. neo-light)
-        _repo_root = Path(__file__).resolve().parents[2]
+        # CHG-2026-032: repo root, not the shared ~/Projects parent.
+        _repo_root = Path(__file__).resolve().parents[1]
         work_dir = Path(context.get("work_dir", str(_repo_root / "work/boa"))) if context else (_repo_root / "work/boa")
 
     # Lazy import to avoid circular dependency with monica_integration
@@ -924,8 +1213,14 @@ def run_boa(
     if itil_classification.get("classification") == "incident":
         confidence = min(confidence, 80)
 
-    # 2. Collect answers from all 6 seats.
-    seat_answers = [_generate_seat_answer(seat, question, tier) for seat in SEATS]
+    # 2. Option B (CHG-2026-032): NO seat answers are generated.
+    #
+    # Verified before this change: mock_backends.py held hardcoded prose and
+    # BOA_BACKEND=live selected a *different* set of canned strings, not a live
+    # endpoint. Seven runs produced zero real intelligence while reporting
+    # "Seat answers: 6" and exiting 0. The keys stay for caller compatibility
+    # (see test_boa_does_not_fabricate_seat_answers) but are always empty.
+    seat_answers: List[Dict[str, Any]] = []
 
     # 3. TOS probe for routing/quality questions
     tos_probe = probe_t2_gateways(question)
@@ -933,12 +1228,16 @@ def run_boa(
     # 4. Swarm governance for swarm-plan questions
     swarm_governance = validate_swarm_plan(question)
 
-    # 5. Synthesise.
-    synthesis = _synthesise(
-        seat_answers, tier, confidence,
+    # 5. Governance statement — an honest account of what was computed, NOT a
+    #    board opinion. It must never read as advice received from a model.
+    synthesis = _governance_statement(
+        question=question,
+        tier=tier,
+        confidence=confidence,
         itil_classification=itil_classification,
         tos_probe=tos_probe,
         swarm_governance=swarm_governance,
+        decision=decision,
     )
 
     # 6. Log governance decision
@@ -968,7 +1267,9 @@ def run_boa(
     return {
         "tier": tier,
         "confidence": confidence,
+        # Keys retained for caller compatibility; always empty. Option B.
         "seat_answers": seat_answers,
+        "advisory_seats": len(seat_answers),
         "synthesis": synthesis,
         "log_path": str(log_path),
         "decision": decision,
@@ -1047,10 +1348,9 @@ def _cli() -> None:
     if result.get("governance_log_path"):
         print(f"\n📁 Governance log: {result['governance_log_path']}")
 
-    print(f"\nSeat answers: {len(result['seat_answers'])}")
-    for ans in result["seat_answers"]:
-        print(f"  [{ans['seat_name']}] {ans['answer'][:80]}...")
-    print(f"\nSynthesis:\n{result['synthesis']}")
+    # Option B (CHG-2026-032): no seat answers exist and none are generated.
+    print("\nAdvisory seats: 0 (none configured — see CHG-2026-032)")
+    print(f"\nGovernance decision:\n{result['synthesis']}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1097,9 +1397,11 @@ def _test_boa_session() -> None:
         status = "PASS" if swarm.get("governance_pass") else "REJECTED"
         print(f"🐝 Swarm: {status}")
 
-    print(f"\nSeat Answers ({len(result['seat_answers'])}):")
-    for ans in result["seat_answers"]:
-        simulated = ans.get("simulated", True)
+    # Option B (CHG-2026-032): no seat answers exist or are generated.
+    print("\nAdvisory seats: 0 (none configured — CHG-2026-032)")
+    if False:
+        for ans in result["seat_answers"]:
+            simulated = ans.get("simulated", True)
         backend_name = ans.get("backend", "?")
         quality = ans.get("quality", "?")
         tag = "SIM" if simulated else "LIVE"
@@ -1111,11 +1413,11 @@ def _test_boa_session() -> None:
 
     # Verify integration
     errors = []
-    for ans in result["seat_answers"]:
-        if backend == "live" and ans.get("simulated"):
-            errors.append(f"  {ans['seat_name']}: expected live answer, got simulated")
-        if backend == "live" and ans.get("backend") == "mock":
-            errors.append(f"  {ans['seat_name']}: backend tag is 'mock' in live mode")
+    # Option B: the old check here asserted seats returned real (non-mock)
+    # content. That check passed on hardcoded strings, so it was a green light
+    # on fabrication. It is removed rather than rewritten: with no seats there
+    # is nothing to validate, and validate_swarm_plan / the router's own
+    # thresholds are covered by the real test suite instead.
 
     if errors:
         print(f"\n❌ Integration errors:")
@@ -1123,7 +1425,7 @@ def _test_boa_session() -> None:
             print(e)
         sys.exit(1)
     else:
-        print(f"\n✅ Integration OK — all seats returned expected backend type ({backend})")
+        print("✅ Integration OK — governance layer returned a decision (no seats involved)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

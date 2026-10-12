@@ -35,10 +35,20 @@ def calibrate_confidence(category: str, base_confidence: int) -> int:
     ]
     if len(category_entries) <= 5:
         return base_confidence
-    successes = sum(
-        1 for e in category_entries
-        if e["outcome"].get("outcome_type") == "worked"
-    )
+    # The writer (plugin.token_optimiser_feedback) stores
+    #   {"outcome": {"outcome": "worked", "quality": ..., "delta": 0}}
+    # NOT an "outcome_type" key. The old lookup here always missed, so
+    # success_rate was 0.0 for every category and the <0.5 branch fired a
+    # permanent -10 penalty despite a ~93% real success rate.
+    # Accept both shapes so old and new log rows are honoured.
+    def _worked(entry: dict) -> bool:
+        outcome = entry.get("outcome") or {}
+        if not isinstance(outcome, dict):
+            return str(outcome).strip().lower() in ("worked", "success", "ok", "true")
+        marker = outcome.get("outcome_type", outcome.get("outcome"))
+        return str(marker).strip().lower() in ("worked", "success", "ok", "true")
+
+    successes = sum(1 for e in category_entries if _worked(e))
     success_rate = successes / len(category_entries)
     if success_rate < 0.5:
         base_confidence -= 10

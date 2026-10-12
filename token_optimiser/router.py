@@ -30,8 +30,15 @@ class Tier:
     confidence_min: int
     confidence_max: int
 
+# DEFECT (CHG-2026-034): T1's backend was declared "ollama" while the URL was
+    # a llama-server endpoint on :8081. Nothing imports ollama_control for T1,
+    # so the label pointed at a service that is not installed or running
+    # (`systemctl --user is-active ollama` -> inactive). Any code matching on
+    # backend == "ollama" would therefore never reach the real local model, which
+    # is why T1 never routed correctly.
 TIERS = [
-    Tier("T1", "Local free (llama-server)", "ollama", "$0 local, private, offline",
+    Tier("T1", "Local free (llama-server, Vulkan/RX480)", "llama_server",
+         "$0 local, private, offline",
          confidence_min=80, confidence_max=101),
     Tier("T1b", "Local secondary (Lenovo CPU)", "local_cpu", "$0 local, private, offline, larger model",
          confidence_min=70, confidence_max=80),
@@ -237,6 +244,40 @@ PARALLELIZE_KEYWORDS = [
 # BOA/ITIL now drives tier and swarm decisions in assess()
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_PROJECT_WORK_MARKERS = (
+    "first failure wins", "failure rate", "return the", "refactor", "function",
+    "test", "tests", "assert", "class ", "def ", "module", "pipeline",
+    "optimise", "optimize", "the pipeline", "loop", "variable", "config file",
+    "code", "commit", "function returns",
+)
+
+
+def _reads_as_project_work(q: str) -> bool:
+    """True when the text is implementation work, not a service event.
+
+    Deliberately a marker list rather than an inference. The ITIL master states
+    "Project work is not a ticket", so the safe direction is to decline to
+    classify rather than manufacture an incident out of a code comment.
+    """
+    low = q.lower()
+    return any(m in low for m in _PROJECT_WORK_MARKERS)
+
+
+def _keyword_weight(kw: str) -> float:
+    """Specificity weight for an ITIL keyword hit.
+
+    A multi-word phrase is far stronger evidence than a bare noun: "connection
+    refused" describes an outage, "refused" is a word. Single words are worth
+    less than 1.0 so a lone match cannot out-score a genuine phrase.
+    """
+    words = kw.split()
+    if len(words) >= 3:
+        return 1.6
+    if len(words) == 2:
+        return 1.3
+    return 0.8
+
+
 # ITIL incident keywords — service disruption, degradation, failures
 ITIL_INCIDENT_KEYWORDS = [
     "down", "outage", "failure", "failed", "broken", "error", "crash", "stale",
@@ -312,8 +353,19 @@ def classify_itil(question: str) -> Dict[str, Any]:
     for cat, keywords in categories.items():
         hits = [kw for kw in keywords if kw in q]
         matched_keywords[cat] = hits
-        # Score: number of hits, weighted by keyword specificity (longer = more specific)
-        score = sum(len(kw.split()) for kw in hits)
+        # DEFECT (CHG-2026-036): the old score was `sum(len(kw.split()) for kw in
+        # hits)`, so ONE bare word scored 1.0 and a single-category match reported
+        # confidence 1.0 — 100%. Verified reproductions:
+        #   "first failure wins - return the first failing task"  -> incident @ 100%
+        #   "optimise the failure rate of the pipeline"           -> incident @ 100%
+        # Both are project work, and both manufactured an INCIDENT plus a CHG
+        # number. Two changes below:
+        #   1. `confidence` is the winning category's score SHARED with the
+        #      runners-up, so a contested word cannot reach 1.0.
+        #   2. A bare single-word hit is discounted — specificity matters more
+        #      than raw count, and multi-word phrases like "change request" or
+        #      "connection refused" are strong evidence; "slow" alone is not.
+        score = sum(_keyword_weight(kw) for kw in hits)
         scores[cat] = float(score)
 
     max_score = max(scores.values()) if scores else 0.0
@@ -330,8 +382,35 @@ def classify_itil(question: str) -> Dict[str, Any]:
         }
 
     best_category = max(scores, key=scores.get)
-    confidence = max_score / (total_score + 1e-6) if total_score > 0 else 0.0
+    # DEFECT (CHG-2026-036): see above. Competitor mass now suppresses
+    # confidence, so one ambiguous bare noun cannot present as certainty.
+    competitors = total_score - max_score
+    confidence = max_score / (max_score + competitors + 1e-6) if max_score > 0 else 0.0
     confidence = min(confidence, 1.0)
+    # A lone bare noun is weak evidence, so it also cannot be a HIGH confidence
+    # classification on its own. Two or more weighted hits, or any multi-word
+    # phrase, are required before an ops label is asserted with conviction.
+    best_hits = matched_keywords.get(best_category, [])
+    if max_score < 2.0 and all(len(k.split()) == 1 for k in best_hits):
+        # CHG-2026-036: a lone bare noun is weak evidence. The cap is 0.4 —
+        # low enough to stop it asserting an INCIDENT, high enough that a real
+        # outage described in one word ("down") is still visibly more likely
+        # than not. A genuine outage almost always carries a second signal
+        # ("down", "outage", "restoring", an INC id) and clears the cap.
+        confidence = min(confidence, 0.4)
+        # A bare noun inside an engineering sentence is very likely a control
+        # word, not an outage: "first failure wins", "failure rate". When the
+        # text also reads as implementation work, do not classify as ops at all.
+        if _reads_as_project_work(q):
+            return {
+                "is_ops": False,
+                "classification": "unknown",
+                "confidence": 0.0,
+                "requires_chg_number": False,
+                "prefix": "",
+                "keywords_matched": [],
+                "suppressed_bare_noun": matched_keywords.get(best_category, []),
+            }
 
     prefix_map = {
         "incident": "INC",

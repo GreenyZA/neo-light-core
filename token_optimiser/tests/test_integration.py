@@ -171,15 +171,32 @@ class TestBOASessionEndToEnd:
         assert result["tier"] in ("T1", "T2", "T3", "ASK")
         assert isinstance(result["seat_answers"], list)
 
-    def test_boa_seat_answers_have_6_seats(self, tmp_path):
-        """BOA should always produce answers from all 6 board seats."""
+    def test_boa_does_not_fabricate_seat_answers(self, tmp_path):
+        """Option B (CHG-2026-032): no advisory seats exist, so none may be reported.
+
+        This REPLACED `test_boa_seat_answers_have_6_seats`, which asserted
+        len(seat_answers) == 6. That test locked in the fabrication rather than
+        catching it: it only proved six strings were returned, never that any
+        model produced them. mock_backends.py held hardcoded prose and
+        BOA_BACKEND=live selected a *different* set of canned strings, so the
+        old assertion passed while the board fabricated every answer.
+
+        The invariant below is strictly stronger: it asserts the absence of
+        fabricated output AND that no "6 seats" framing survives anywhere in the
+        session log.
+        """
         from token_optimiser.boa import run_boa
         result = run_boa("How to structure a microservice?", work_dir=tmp_path)
-        assert len(result["seat_answers"]) == 6
-        seat_ids = {s["seat_id"] for s in result["seat_answers"]}
-        assert "architect" in seat_ids
-        assert "engineer" in seat_ids
-        assert "executive" in seat_ids
+        assert result["seat_answers"] == []
+        assert result["advisory_seats"] == 0
+
+        log = Path(result["log_path"])
+        assert log.is_file()
+        text = log.read_text(encoding="utf-8")
+        assert "## Seat Answers" not in text
+        assert "6 seats" not in text
+        # The perspectives survive as a CHECKLIST, not as advice received.
+        assert "CHECKLIST" in text or "checklist" in text
 
     def test_boa_session_log_written(self, tmp_path):
         """BOA session log file should be created."""
@@ -241,13 +258,24 @@ class TestBOASessionEndToEnd:
         governance = validate_swarm_plan("Use 5 workers to process 10 files in parallel")
         assert governance["governed"] is True
 
-    def test_boa_synthesis_includes_board_info(self, tmp_path):
-        """Synthesis paragraph should mention tier and seat count."""
+    def test_boa_synthesis_states_it_is_a_governance_decision(self, tmp_path):
+        """Option B: 'synthesis' must be an honest governance statement, not board opinion.
+
+        This REPLACED `test_boa_synthesis_includes_board_info`, which asserted
+        "6 seats" in synthesis. That assertion required six fabricated personas
+        to exist, so Option B was mathematically unable to satisfy it. The
+        replacement asserts the honest invariant instead: the synthesis carries
+        the tier and states plainly that no advisory board produced it.
+        """
         from token_optimiser.boa import run_boa
         result = run_boa("Best practices for API design?", work_dir=tmp_path)
         synthesis = result["synthesis"]
         assert result["tier"] in synthesis
-        assert "6 seats" in synthesis or "6" in synthesis
+        assert "6 seats" not in synthesis
+        # Must not read as though a model gave advice.
+        for forbidden in ("mock]", "Response for:", "perspective applied"):
+            assert forbidden not in synthesis
+        assert "no advisory" in synthesis.lower() or "not a board" in synthesis.lower()
 
 
 # ---------------------------------------------------------------------------
