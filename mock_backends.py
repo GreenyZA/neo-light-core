@@ -596,8 +596,8 @@ class OptimiserTestHarness:
         self.results: list = []
 
     def run_task(self, task: str, context: Optional[dict] = None) -> Dict[str, Any]:
-        from router import TokenRouter, LearningLog
-        from config import config as default_config
+        from token_optimiser.router import TokenRouter, LearningLog
+        from token_optimiser.config import config as default_config
 
         router = TokenRouter()
         log = LearningLog()
