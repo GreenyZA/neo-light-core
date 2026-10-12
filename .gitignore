@@ -7,3 +7,4 @@ __pycache__/
 learning_log.jsonl
 .env
 .DS_Store
+token_optimiser/credentials.py

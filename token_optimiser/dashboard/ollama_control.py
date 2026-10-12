@@ -35,8 +35,16 @@ class OllamaConfig:
     host: str = "192.168.1.10"
     """Ollama server host."""
 
-    port: int = 8081
-    """Ollama API port."""
+    # DEFECT (CHG-2026-035): this was 8081 — the llama.cpp / Vulkan T1 port. So
+    # every "Ollama health check" actually queried llama.cpp with Ollama's
+    # `/api/tags` path, got HTTP 404, and reported the local model as DEAD. That
+    # false negative is why T1 looked broken for so long: the health check was
+    # measuring the wrong server on the wrong port, then falling through to an
+    # SSH probe that also failed. Verified: curl to :11434/api/tags returns 200
+    # and Ollama is live with llama3.1-16k; curl to :8081/api/tags returns 404
+    # because that is llama.cpp, which speaks /v1/* not /api/*.
+    port: int = 11434
+    """Ollama API port. Ollama's default is 11434; 8081 is llama.cpp (T1)."""
 
     ssh_user: str = "warpuppy"
     """SSH user for remote control (if SSH is needed)."""
@@ -150,13 +158,20 @@ def _api_request(method: str, path: str, data: Optional[Dict] = None,
     """
     import urllib.request
     import urllib.error
+    # DEFECT (CHG-2026-035): `import json as json_mod` lived inside the
+    # `if data is not None:` block below, but json_mod is also used to parse
+    # the RESPONSE. Every GET — including the health check's /api/tags — raised
+    # UnboundLocalError, which the broad `except Exception` converted into
+    # "unreachable". Ollama was therefore reported dead while serving 200s, and
+    # the fallback SSH probe then also failed. A GET never needs this import to
+    # be conditional.
+    import json as json_mod
 
     url = f"http://{ollama_config.host}:{ollama_config.port}{path}"
     body = None
     headers = {}
 
     if data is not None:
-        import json as json_mod
         body = json_mod.dumps(data).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
