@@ -30,9 +30,18 @@ class Tier:
     confidence_min: int
     confidence_max: int
 
+# DEFECT (CHG-2026-034): T1's backend was declared "ollama" while the URL was
+    # a llama-server endpoint on :8081. Nothing imports ollama_control for T1,
+    # so the label pointed at a service that is not installed or running
+    # (`systemctl --user is-active ollama` -> inactive). Any code matching on
+    # backend == "ollama" would therefore never reach the real local model, which
+    # is why T1 never routed correctly.
 TIERS = [
-    Tier("T1", "Local free (llama-server)", "ollama", "$0 local, private, offline",
+    Tier("T1", "Local free (llama-server, Vulkan/RX480)", "llama_server",
+         "$0 local, private, offline",
          confidence_min=80, confidence_max=101),
+    Tier("T1b", "Local secondary (Lenovo CPU)", "local_cpu", "$0 local, private, offline, larger model",
+         confidence_min=70, confidence_max=80),
     Tier("T2", "Free cloud (OpenRouter/NVIDIA/DeepSeek/Poolside)", "free_cloud", "$0 free tiers, frontier models",
          confidence_min=60, confidence_max=80),
     Tier("T3", "High-tier (Grok/Solar)", "high_tier", "paid plan, security + final judgment",
@@ -235,6 +244,40 @@ PARALLELIZE_KEYWORDS = [
 # BOA/ITIL now drives tier and swarm decisions in assess()
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_PROJECT_WORK_MARKERS = (
+    "first failure wins", "failure rate", "return the", "refactor", "function",
+    "test", "tests", "assert", "class ", "def ", "module", "pipeline",
+    "optimise", "optimize", "the pipeline", "loop", "variable", "config file",
+    "code", "commit", "function returns",
+)
+
+
+def _reads_as_project_work(q: str) -> bool:
+    """True when the text is implementation work, not a service event.
+
+    Deliberately a marker list rather than an inference. The ITIL master states
+    "Project work is not a ticket", so the safe direction is to decline to
+    classify rather than manufacture an incident out of a code comment.
+    """
+    low = q.lower()
+    return any(m in low for m in _PROJECT_WORK_MARKERS)
+
+
+def _keyword_weight(kw: str) -> float:
+    """Specificity weight for an ITIL keyword hit.
+
+    A multi-word phrase is far stronger evidence than a bare noun: "connection
+    refused" describes an outage, "refused" is a word. Single words are worth
+    less than 1.0 so a lone match cannot out-score a genuine phrase.
+    """
+    words = kw.split()
+    if len(words) >= 3:
+        return 1.6
+    if len(words) == 2:
+        return 1.3
+    return 0.8
+
+
 # ITIL incident keywords — service disruption, degradation, failures
 ITIL_INCIDENT_KEYWORDS = [
     "down", "outage", "failure", "failed", "broken", "error", "crash", "stale",
@@ -310,8 +353,19 @@ def classify_itil(question: str) -> Dict[str, Any]:
     for cat, keywords in categories.items():
         hits = [kw for kw in keywords if kw in q]
         matched_keywords[cat] = hits
-        # Score: number of hits, weighted by keyword specificity (longer = more specific)
-        score = sum(len(kw.split()) for kw in hits)
+        # DEFECT (CHG-2026-036): the old score was `sum(len(kw.split()) for kw in
+        # hits)`, so ONE bare word scored 1.0 and a single-category match reported
+        # confidence 1.0 — 100%. Verified reproductions:
+        #   "first failure wins - return the first failing task"  -> incident @ 100%
+        #   "optimise the failure rate of the pipeline"           -> incident @ 100%
+        # Both are project work, and both manufactured an INCIDENT plus a CHG
+        # number. Two changes below:
+        #   1. `confidence` is the winning category's score SHARED with the
+        #      runners-up, so a contested word cannot reach 1.0.
+        #   2. A bare single-word hit is discounted — specificity matters more
+        #      than raw count, and multi-word phrases like "change request" or
+        #      "connection refused" are strong evidence; "slow" alone is not.
+        score = sum(_keyword_weight(kw) for kw in hits)
         scores[cat] = float(score)
 
     max_score = max(scores.values()) if scores else 0.0
@@ -328,8 +382,35 @@ def classify_itil(question: str) -> Dict[str, Any]:
         }
 
     best_category = max(scores, key=scores.get)
-    confidence = max_score / (total_score + 1e-6) if total_score > 0 else 0.0
+    # DEFECT (CHG-2026-036): see above. Competitor mass now suppresses
+    # confidence, so one ambiguous bare noun cannot present as certainty.
+    competitors = total_score - max_score
+    confidence = max_score / (max_score + competitors + 1e-6) if max_score > 0 else 0.0
     confidence = min(confidence, 1.0)
+    # A lone bare noun is weak evidence, so it also cannot be a HIGH confidence
+    # classification on its own. Two or more weighted hits, or any multi-word
+    # phrase, are required before an ops label is asserted with conviction.
+    best_hits = matched_keywords.get(best_category, [])
+    if max_score < 2.0 and all(len(k.split()) == 1 for k in best_hits):
+        # CHG-2026-036: a lone bare noun is weak evidence. The cap is 0.4 —
+        # low enough to stop it asserting an INCIDENT, high enough that a real
+        # outage described in one word ("down") is still visibly more likely
+        # than not. A genuine outage almost always carries a second signal
+        # ("down", "outage", "restoring", an INC id) and clears the cap.
+        confidence = min(confidence, 0.4)
+        # A bare noun inside an engineering sentence is very likely a control
+        # word, not an outage: "first failure wins", "failure rate". When the
+        # text also reads as implementation work, do not classify as ops at all.
+        if _reads_as_project_work(q):
+            return {
+                "is_ops": False,
+                "classification": "unknown",
+                "confidence": 0.0,
+                "requires_chg_number": False,
+                "prefix": "",
+                "keywords_matched": [],
+                "suppressed_bare_noun": matched_keywords.get(best_category, []),
+            }
 
     prefix_map = {
         "incident": "INC",
@@ -390,7 +471,7 @@ ORCHESTRATOR_ROUTING = [
     },
 ]
 
-_TIER_ORDER = {"T1": 1, "T2": 2, "T3": 3}
+_TIER_ORDER = {"T1": 1, "T1b": 1, "T2": 2, "T3": 3}
 
 
 def _tier_at_least(tier: str, minimum: str) -> str:
@@ -406,7 +487,7 @@ def route_orchestrator_task(task_type: str, base_confidence: int) -> "RoutingDec
     return a RoutingDecision that enforces minimum tier, recommended workers,
     and review requirements.  Same task_type + same config ⇒ same decision.
     """
-    from config import config
+    from token_optimiser.config import config
 
     task_lower = task_type.lower()
     match = None
@@ -461,7 +542,7 @@ def route_orchestrator_task(task_type: str, base_confidence: int) -> "RoutingDec
 
 def _confidence_to_tier(confidence: int) -> str:
     """Simple confidence → tier mapping (mirrors standard routing bands)."""
-    from config import config
+    from token_optimiser.config import config
     if confidence >= config.threshold_t1_min:
         return "T1"
     if confidence >= config.threshold_t2_min:
@@ -479,13 +560,13 @@ class TokenRouter:
     def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self.learning_log_path = self.config.get(
-            "learning_log_path", "learning_log.jsonl"
+            "learning_log_path", "token_optimiser/learning_log.jsonl"
         )
         if "enabled" in self.config:
             self.enabled = self.config["enabled"]
         else:
             try:
-                from config import config as _global
+                from token_optimiser.config import config as _global
                 self.enabled = _global.enabled
             except ImportError:
                 self.enabled = True
@@ -523,7 +604,7 @@ class TokenRouter:
         confidence = max(0, min(99, confidence))
 
         # Apply category-level confidence caps
-        from config import config
+        from token_optimiser.config import config
         for m in matches:
             cat_name = m["name"]
             cap = config.category_confidence_caps.get(cat_name)
@@ -553,7 +634,10 @@ class TokenRouter:
 
         # If non-trivial and not forced T3, aggressively use T2 for the main task too
         if swarm.get("non_trivial") and tier not in ("T3", "ASK") and config.free_tier_priority:
-            if not (itil_classification.get("classification") == "change" or
+            # Don't override privacy-forced local routing (T1/T1b) to cloud T2
+            privacy_forced = tier in ("T1", "T1b")
+            if not privacy_forced and not (
+                    itil_classification.get("classification") == "change" or
                     (matches and any(m.get("name") == "security" for m in matches))):
                 tier = "T2"
                 rationale += " | ITIL+swarm non-trivial: forced T2 (free tier max)"
@@ -586,7 +670,7 @@ class TokenRouter:
         - Presence of parallelizable keywords
         - Task word count (longer tasks → more parallelizable)
         """
-        from config import config
+        from token_optimiser.config import config
 
         task_lower = task.lower()
 
@@ -665,7 +749,7 @@ class TokenRouter:
         Non-trivial = score >8 .
         Strongly biases toward T2 free tier usage for workers unless security/change forces T3.
         """
-        from config import config
+        from token_optimiser.config import config
 
         file_count = self._estimate_file_count(task)
         module_count = self._estimate_module_count(task)
@@ -774,7 +858,7 @@ class TokenRouter:
 
     def _determine_scope(self, words: int, lines_hint: Optional[int], task_text: str = "") -> str:
         """Determine task scope: small, medium, or large."""
-        from config import config
+        from token_optimiser.config import config
 
         if task_text:
             import re
@@ -838,7 +922,7 @@ class TokenRouter:
         Now driven by ITIL/BOA governance: prioritize free (T2) aggressively unless
         security or change classification forces T3.
         """
-        from config import config
+        from token_optimiser.config import config
 
         # ── ITIL / BOA GOVERNANCE OVERRIDE FIRST (forces T3 for change/security even on ambiguous) ─
         if itil_classification and itil_classification.get("is_ops"):
@@ -859,14 +943,23 @@ class TokenRouter:
 
         # ── PRIVACY / OFFLINE SHORT-CIRCUIT ─────────────────────────────────────
         # If privacy_force_t1 is enabled, check task text for privacy/offline keywords.
-        # These ALWAYS route to T1 regardless of free_tier_priority — data never leaves.
+        # These ALWAYS route to T1 or T1b regardless of free_tier_priority — data never leaves.
         if config.privacy_force_t1 and matches:
             top_match = matches[0]
-            if top_match.get("force_tier") == "T1" or top_match["name"] == "privacy":
-                return "T1"
+            privacy_forced = (
+                top_match.get("force_tier") == "T1" or
+                top_match["name"] == "privacy"
+            )
             # Also check raw keyword match from config.privacy_offline_keywords
             task_lower = self._last_task_text.lower() if hasattr(self, '_last_task_text') else ""
             if any(kw in task_lower for kw in config.privacy_offline_keywords):
+                privacy_forced = True
+            
+            if privacy_forced:
+                # Check if T1b keywords are also present — route to Lenovo's 7B CPU model
+                if hasattr(config, 't1b_keywords') and any(kw in task_lower for kw in config.t1b_keywords):
+                    if config.tier_backends.get("T1b", {}).get("enabled", True):
+                        return "T1b"
                 return "T1"
 
         # ── ARCHITECTURE MINIMUM TIER ───────────────────────────────────────────
@@ -911,7 +1004,7 @@ class TokenRouter:
     def _build_rationale(self, matches: list, scope: str, confidence: int, tier: str,
                          unique_categories: int = 0) -> str:
         """Build a human-readable rationale for the routing decision."""
-        from config import config
+        from token_optimiser.config import config
 
         self._last_matches = matches
 
@@ -923,7 +1016,7 @@ class TokenRouter:
                 parts.append(f"+{len(matches)-1} more category matches")
         parts.append(f"Scope: {scope}")
         parts.append(f"Confidence: {confidence}%")
-        parts.append(f"Thresholds: T1≥{config.threshold_t1_min} | T2≥{config.threshold_t2_min} | T3<{config.threshold_t3_always_below}")
+        parts.append(f"Thresholds: T1≥{config.threshold_t1_min} | T1b(priv) | T2≥{config.threshold_t2_min} | T3<{config.threshold_t3_always_below}")
 
         if tier == "ASK":
             reasons = []
@@ -1000,7 +1093,7 @@ class RoutingDecision:
 class LearningLog:
     """Append-only log of routing decisions and their outcomes."""
 
-    def __init__(self, path: str = "learning_log.jsonl"):
+    def __init__(self, path: str = "token_optimiser/learning_log.jsonl"):
         self.path = path
 
     def append(self, decision: Optional[RoutingDecision] = None, outcome: Optional[dict] = None, extra: Optional[dict] = None):

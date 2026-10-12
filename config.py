@@ -1,16 +1,31 @@
 """
 Token Optimiser — Configuration
 
+UPDATED 2026-10-04 (CHG-2026-030) — corrected against the wire, not from memory:
+|- T1 endpoint: 192.168.1.10:8081 (llama-server, Vulkan, RX 480)
+|- T1 model: phi-4-mini-instruct Q4_K_M, 3.84B, n_ctx 131072 (WAS: Phi-3.5-mini
+|  Q5_K_M / 4096 ctx / 3.0GB — a model that is not loaded. The server accepts any
+|  model name and silently substitutes, so the wrong name never errored.)
+|- T1 fallback: NONE. qwen2.5-coder-3b-instruct is not on this box.
+|- T1b: DISABLED. Both 192.168.1.8:8082 and 192.168.1.102:8082 return HTTP 000;
+|  nothing on the LAN serves 8082. The privacy short-circuit sends its
+|  strictest tasks here, so a dead T1b silently strands them.
+|- Credentials: token_optimiser never loaded ~/.hermes/.env, so from inside this
+|  process every free tier looked unavailable and decisions escalated to T3.
+|  Fixed in credentials.py (auto-loads on import; env always wins).
+|- Calibration: the writer stores outcome={"outcome": "worked"}; the reader
+|  looked for "outcome_type". Every category took a permanent -10 penalty.
+|  Fixed in monica_integration.py.
+|- T3 remains opt-in (enabled: False) per Johann's standing "No SuperGrok".
+
 UPDATED 2026-09-19:
-- T1 endpoint: 192.168.1.10:8081 (llama-server, Vulkan, RX 480)
-- T1 model: Phi-3.5-mini-instruct Q5_K_M (3.0GB, fits 4GB VRAM with 4K context)
-- T2 expanded: 40+ free models (NVIDIA Nemotron, DeepSeek V4 Flash, Poolside, etc.)
-- New: Free tier priority mode — T2 free cloud before T1 when quality is better
-- New: NVIDIA NIM integration (integrate.api.nvidia.com/v1)
-- New: DeepSeek V4 Flash free via OpenRouter AND NVIDIA NIM
+|- T2 expanded: 40+ free models (NVIDIA Nemotron, DeepSeek V4 Flash, Poolside, etc.)
+|- New: Free tier priority mode — T2 free cloud before T1 when quality is better
+|- New: NVIDIA NIM integration (integrate.api.nvidia.com/v1)
+|- New: DeepSeek V4 Flash free via OpenRouter AND NVIDIA NIM
+|- T1b was: secondary local tier on Lenovo M710Q for larger CPU models when
+  privacy requires local + more knowledge than T1's 3B.
 """
-import sys
-import os
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -45,20 +60,57 @@ class TokenOptimiserConfig:
 
     tier_backends: dict = field(default_factory=lambda: {
         "T1": {
+            # VERIFIED against the wire 2026-10-04. This box IS 192.168.1.10;
+            # the running server's own cmdline is:
+            #   llama-server -m .../Phi-4-mini-instruct-Q4_K_M.gguf -dev Vulkan0
+            #     -ngl 99 -c 131072 -ctk q4_0 --port 8081 --alias phi-4-mini-instruct
+            # /v1/models reports id=phi-4-mini-instruct, n_ctx=131072,
+            # n_params=3.84B. The old values (Phi-3.5-mini-Q5_K_M, 4096 ctx,
+            # 3.0GB) described a model that is not loaded. CRITICAL: this server
+            # accepts ANY model name and silently substitutes what it has, so a
+            # wrong name here never errors — it just misreports what it serves.
             "url": "http://192.168.1.10:8081",
-            "model": "Phi-3.5-mini-instruct-Q5_K_M",
-            "fallback_model": "qwen2.5-coder-3b-instruct",
-            "max_prompt_tokens": 4096,
+            "model": "phi-4-mini-instruct",
+            # No local fallback exists: qwen2.5-coder-3b-instruct is not on this
+            # box. Falling back to it can only produce a false claim. Escalate
+            # to T2 free instead, which is a real, working tier.
+            "fallback_model": None,
+            "max_prompt_tokens": 32768,
             "enabled": True,
-            "tweak_notes": "Local llama-server on RX 480 (Vulkan). Phi-3.5-mini Q5_K_M = 3.0GB VRAM, ~25-35 tok/s. Best quality for 4GB card.",
-            "quality_rating": 0.75,
-            "vram_usage_gb": 3.0,
-            "context_tokens": 4096,
+            "tweak_notes": "Local llama-server on RX 480 (Vulkan). Phi-4-mini-instruct Q4_K_M, 3.84B, n_ctx 131072, q4_0 KV. ~40-90 tok/s measured. NOTE: 3B-class -- route substantive work to T2 free.",
+            "quality_rating": 0.70,
+            "vram_usage_gb": 2.48,
+            "context_tokens": 131072,
             "alternative_models": {
                 "code": "Qwen2.5-Coder-7B-Instruct-IQ3_S (3.0GB, best code)",
-                "reasoning": "Phi-3.5-mini-instruct-Q5_K_M (3.0GB, best reasoning)",
+                "reasoning": "phi-4-mini-instruct Q4_K_M (2.5GB, best local reasoning)",
                 "agentic": "Qwen3.5-4B-Q4_K_M (2.4GB, tool calling)",
                 "fast": "Llama-3.2-3B-Instruct-Q4_K_M (2.0GB, fastest)",
+            },
+        },
+        "T1b": {
+            # DISABLED 2026-10-04. Both candidate hosts are dead:
+            #   192.168.1.8:8082   -> HTTP 000 (connection refused)
+            #   192.168.1.102:8082 -> HTTP 000 (connection refused)
+            # Nothing on this LAN serves 8082 at all. An uncommitted edit had
+            # moved this from .102 to .8, which made it unreachable rather than
+            # fixing it. The privacy short-circuit routes its STRICTEST tasks
+            # here, so a dead T1b means "must stay local, offline, air-gapped"
+            # work has nowhere to go. Left enabled, it advertised a capability
+            # that does not exist. Disabled until a host actually runs it.
+            "url": None,
+            "model": "qwen2.5-7b-instruct-1m",
+            "fallback_model": None,
+            "max_prompt_tokens": 32768,
+            "enabled": False,
+            "tweak_notes": "DISABLED: no host on the LAN serves :8082. Was Lenovo M710Q CPU llama-server. Re-enable only after a live /v1/models probe returns 200.",
+            "quality_rating": 0.0,
+            "vram_usage_gb": 0,
+            "context_tokens": 0,
+            "alternative_models": {
+                "code": "qwen2.5-7b-instruct-1m (CPU, 7B, larger context)",
+                "chat": "qwen2.5-7b-instruct-1m (CPU, more knowledge than T1 3B)",
+                "reasoning": "qwen2.5-7b-instruct-1m (CPU, 7B for complex analysis)",
             },
         },
         "T2": {
@@ -164,6 +216,13 @@ class TokenOptimiserConfig:
     ])
 
     privacy_force_t1: bool = True
+
+    # Keywords that indicate the user needs a larger model than T1's 3B.
+    # When combined with privacy/offline keywords (force T1), routes to T1b (Lenovo 7B CPU) instead.
+    t1b_keywords: list = field(default_factory=lambda: [
+        "deep analysis", "7b", "larger model", "more knowledge",
+        "longer context", "complex analysis", "deep reasoning", "detailed output",
+    ])
     threshold_t1_min: int = 80
     threshold_t2_min: int = 60
     threshold_t3_always_below: int = 60
@@ -231,20 +290,11 @@ class TokenOptimiserConfig:
             "min_orchestrator_tier": self.min_orchestrator_tier,
             "enforce_review": self.enforce_review,
             "governance_mode": self.governance_mode,
+            "t1b_keywords": self.t1b_keywords,
         }
 
 
 config = TokenOptimiserConfig()
-
-# Load user overrides if present (in user repo, not in core)
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-if _current_dir not in sys.path:
-    sys.path.insert(0, _current_dir)
-try:
-    from config_user import config as user_config
-    config = user_config
-except ImportError:
-    pass  # Use defaults
 
 
 def _ts() -> str:

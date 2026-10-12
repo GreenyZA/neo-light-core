@@ -32,8 +32,8 @@ PACKAGE_DIR = Path(__file__).parent.parent
 if str(PACKAGE_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGE_DIR))
 
-from config import config
-from router import TokenRouter, LearningLog
+from token_optimiser.config import config
+from token_optimiser.router import TokenRouter, LearningLog
 from token_optimiser.dashboard.app import app, serialize_config
 
 logging.basicConfig(level=logging.INFO)
