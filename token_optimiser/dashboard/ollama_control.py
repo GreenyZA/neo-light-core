@@ -2,7 +2,7 @@
 Ollama Server Control — manages the Ollama instance used by T1.
 
 Supports both direct API access (when Ollama is reachable) and SSH-based
-control (when Ollama runs on a remote server like 192.168.1.10).
+control (when Ollama runs on a remote server like localhost).
 
 Commands:
     python3 -m token_optimiser.dashboard.ollama_control status
@@ -32,7 +32,7 @@ logger = logging.getLogger("ollama-control")
 class OllamaConfig:
     """Configuration for Ollama server control."""
 
-    host: str = "192.168.1.10"
+    host: str = "localhost"
     """Ollama server host."""
 
     # DEFECT (CHG-2026-035): this was 8081 — the llama.cpp / Vulkan T1 port. So
@@ -49,13 +49,13 @@ class OllamaConfig:
     ssh_user: str = "warpuppy"
     """SSH user for remote control (if SSH is needed)."""
 
-    ssh_host: str = "192.168.1.10"
+    ssh_host: str = "localhost"
     """SSH target host. Set to same as host for local control."""
 
     ssh_key: Optional[str] = None
     """SSH private key path. Uses default agent if None."""
 
-    models_dir: str = "/home/warpuppy/.ollama/models"
+    models_dir: str = "~/.ollama/models"
     """Ollama models directory on the server."""
 
     default_model: str = "qwen2.5:3b"
