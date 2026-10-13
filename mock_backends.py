@@ -454,7 +454,7 @@ class MockBackendHistory:
     def __init__(self):
         self.history: list = []
         self.gateway_states: dict = {
-            "T1": {"available": True, "model": "qwen2.5-coder-3b-instruct", "base_url": "http://192.168.1.10:8081"},
+            "T1": {"available": True, "model": "qwen2.5-coder-3b-instruct", "base_url": "http://localhost:8081"},
             "T2": {"available": True, "providers": ["OpenRouter", "NVIDIA_NIM", "OmniRoute", "NOUS"]},
             "T3": {"available": False, "providers": ["Grok"]},
         }
@@ -505,7 +505,7 @@ class MockBackendHistory:
     def clear(self):
         self.history = []
         self.gateway_states = {
-            "T1": {"available": True, "model": "qwen2.5-coder-3b-instruct", "base_url": "http://192.168.1.10:8081"},
+            "T1": {"available": True, "model": "qwen2.5-coder-3b-instruct", "base_url": "http://localhost:8081"},
             "T2": {"available": True, "providers": ["OpenRouter", "NVIDIA_NIM", "OmniRoute", "NOUS"]},
             "T3": {"available": False, "providers": ["Grok"]},
         }

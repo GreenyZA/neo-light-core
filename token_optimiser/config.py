@@ -2,12 +2,12 @@
 Token Optimiser — Configuration
 
 UPDATED 2026-10-04 (CHG-2026-030) — corrected against the wire, not from memory:
-|- T1 endpoint: 192.168.1.10:8081 (llama-server, Vulkan, RX 480)
+|- T1 endpoint: localhost:8081 (llama-server, Vulkan, RX 480)
 |- T1 model: phi-4-mini-instruct Q4_K_M, 3.84B, n_ctx 131072 (WAS: Phi-3.5-mini
 |  Q5_K_M / 4096 ctx / 3.0GB — a model that is not loaded. The server accepts any
 |  model name and silently substitutes, so the wrong name never errored.)
 |- T1 fallback: NONE. qwen2.5-coder-3b-instruct is not on this box.
-|- T1b: DISABLED. Both 192.168.1.8:8082 and 192.168.1.102:8082 return HTTP 000;
+|- T1b: DISABLED. Both localhost:8082 and localhost2:8082 return HTTP 000;
 |  nothing on the LAN serves 8082. The privacy short-circuit sends its
 |  strictest tasks here, so a dead T1b silently strands them.
 |- Credentials: token_optimiser never loaded ~/.hermes/.env, so from inside this
@@ -60,7 +60,7 @@ class TokenOptimiserConfig:
 
     tier_backends: dict = field(default_factory=lambda: {
         "T1": {
-            # VERIFIED against the wire 2026-10-04. This box IS 192.168.1.10;
+            # VERIFIED against the wire 2026-10-04. This box IS localhost;
             # the running server's own cmdline is:
             #   llama-server -m .../Phi-4-mini-instruct-Q4_K_M.gguf -dev Vulkan0
             #     -ngl 99 -c 131072 -ctk q4_0 --port 8081 --alias phi-4-mini-instruct
@@ -69,7 +69,7 @@ class TokenOptimiserConfig:
             # 3.0GB) described a model that is not loaded. CRITICAL: this server
             # accepts ANY model name and silently substitutes what it has, so a
             # wrong name here never errors — it just misreports what it serves.
-            "url": "http://192.168.1.10:8081",
+            "url": "http://localhost:8081",
             "model": "phi-4-mini-instruct",
             # No local fallback exists: qwen2.5-coder-3b-instruct is not on this
             # box. Falling back to it can only produce a false claim. Escalate
@@ -90,8 +90,8 @@ class TokenOptimiserConfig:
         },
         "T1b": {
             # DISABLED 2026-10-04. Both candidate hosts are dead:
-            #   192.168.1.8:8082   -> HTTP 000 (connection refused)
-            #   192.168.1.102:8082 -> HTTP 000 (connection refused)
+            #   localhost:8082   -> HTTP 000 (connection refused)
+            #   localhost2:8082 -> HTTP 000 (connection refused)
             # Nothing on this LAN serves 8082 at all. An uncommitted edit had
             # moved this from .102 to .8, which made it unreachable rather than
             # fixing it. The privacy short-circuit routes its STRICTEST tasks

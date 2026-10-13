@@ -246,13 +246,13 @@
         <div class="toggle-row">
           <div>
             <div class="toggle-label">T1 Enabled</div>
-            <small>Local qwen2.5:3b on 192.168.1.10:8081 with Vulkan.</small>
+            <small>Local qwen2.5:3b on localhost:8081 with Vulkan.</small>
           </div>
           <div class="switch on" id="toggle-t1" data-tier="T1" data-key="main"></div>
         </div>
         <div class="form-row">
           <label>Endpoint URL</label>
-          <input type="text" id="f-t1-url" value="http://192.168.1.10:8081">
+          <input type="text" id="f-t1-url" value="http://localhost:8081">
         </div>
         <div class="form-row">
           <label>Model</label>
@@ -929,7 +929,7 @@ function renderOllamaStatus(status) {
   const totalBytes = memInfo.total_model_size_bytes || 0;
   const defaultModel = status.default_model || 'qwen2.5:3b';
   const hostParts = host.split(':');
-  const hostAddr = hostParts[0] || '192.168.1.10';
+  const hostAddr = hostParts[0] || 'localhost';
   const hostPort = hostParts[1] || '8081';
 
   container.innerHTML =
@@ -1011,7 +1011,7 @@ async function ollamaPull(modelName) {
 }
 
 async function saveOllamaConfig() {
-  const host = document.getElementById('ollama-f-host')?.value || '192.168.1.10';
+  const host = document.getElementById('ollama-f-host')?.value || 'localhost';
   const port = document.getElementById('ollama-f-port')?.value || '8081';
   const sshUser = document.getElementById('ollama-f-ssh-user')?.value || 'warpuppy';
   const defaultModel = document.getElementById('ollama-f-default-model')?.value || 'qwen2.5:3b';
