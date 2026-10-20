@@ -7,3 +7,6 @@ __pycache__/
 learning_log.jsonl
 .env
 .DS_Store
+
+# work scratch
+work/
