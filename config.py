@@ -89,7 +89,7 @@ class TokenOptimiserConfig:
             },
         },
         "T1b": {
-            # DISABLED 2026-10-04. Both candidate hosts are dead:
+            # ENABLED 2026-10-30. Qwen2.5-7B-Instruct-Q4_K_M on localhost:8082.
             #   localhost:8082   -> HTTP 000 (connection refused)
             #   localhost2:8082 -> HTTP 000 (connection refused)
             # Nothing on this LAN serves 8082 at all. An uncommitted edit had
@@ -98,15 +98,15 @@ class TokenOptimiserConfig:
             # here, so a dead T1b means "must stay local, offline, air-gapped"
             # work has nowhere to go. Left enabled, it advertised a capability
             # that does not exist. Disabled until a host actually runs it.
-            "url": None,
-            "model": "qwen2.5-7b-instruct-1m",
+            "url": "http://localhost:8082",
+            "model": "Qwen2.5-7B-Instruct-Q4_K_M",
             "fallback_model": None,
             "max_prompt_tokens": 32768,
-            "enabled": False,
-            "tweak_notes": "DISABLED: no host on the LAN serves :8082. Was Lenovo M710Q CPU llama-server. Re-enable only after a live /v1/models probe returns 200.",
-            "quality_rating": 0.0,
+            "enabled": True,
+            "tweak_notes": "ENABLED 2026-10-30: Qwen2.5-7B-Instruct-Q4_K_M (7.6B params, 4.68GB). llama-server on localhost:8082, n_ctx=8192, CPU-only (ngl=0).",
+            "quality_rating": 0.75,
             "vram_usage_gb": 0,
-            "context_tokens": 0,
+            "context_tokens": 8192,
             "alternative_models": {
                 "code": "qwen2.5-7b-instruct-1m (CPU, 7B, larger context)",
                 "chat": "qwen2.5-7b-instruct-1m (CPU, more knowledge than T1 3B)",
