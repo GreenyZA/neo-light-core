@@ -1,12 +1,1 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.coverage
-learning_log.jsonl
-.env
-.DS_Store
-
-# work scratch
 work/
