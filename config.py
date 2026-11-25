@@ -166,6 +166,7 @@ class TokenOptimiserConfig:
                 "z-ai/glm-5.2:free",
                 "qwen/qwen3.8-27b:free",
                 "openrouter/free",
+                "stealth/crouton-alpha",
             ],
             "nvidia_free_models": [
                 "deepseek-ai/deepseek-v4-flash-0731",
