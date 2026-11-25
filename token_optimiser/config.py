@@ -7,9 +7,9 @@ UPDATED 2026-10-04 (CHG-2026-030) — corrected against the wire, not from memor
 |  Q5_K_M / 4096 ctx / 3.0GB — a model that is not loaded. The server accepts any
 |  model name and silently substitutes, so the wrong name never errored.)
 |- T1 fallback: NONE. qwen2.5-coder-3b-instruct is not on this box.
-|- T1b: DISABLED. Both localhost:8082 and localhost2:8082 return HTTP 000;
-|  nothing on the LAN serves 8082. The privacy short-circuit sends its
-|  strictest tasks here, so a dead T1b silently strands them.
+|- T1b: ENABLED. localhost:8082 serves Qwen2.5-7B-Instruct-Q4_K_M
+|  via llama-server (CPU-only, ngl=0, n_ctx=8192). Systemd: llama-t1b.service.
+|  Privacy short-circuit routes strictest tasks here (air-gapped, local-only).
 |- Credentials: token_optimiser never loaded ~/.hermes/.env, so from inside this
 |  process every free tier looked unavailable and decisions escalated to T3.
 |  Fixed in credentials.py (auto-loads on import; env always wins).
@@ -89,28 +89,23 @@ class TokenOptimiserConfig:
             },
         },
         "T1b": {
-            # DISABLED 2026-10-04. Both candidate hosts are dead:
-            #   localhost:8082   -> HTTP 000 (connection refused)
-            #   localhost2:8082 -> HTTP 000 (connection refused)
-            # Nothing on this LAN serves 8082 at all. An uncommitted edit had
-            # moved this from .102 to .8, which made it unreachable rather than
-            # fixing it. The privacy short-circuit routes its STRICTEST tasks
-            # here, so a dead T1b means "must stay local, offline, air-gapped"
-            # work has nowhere to go. Left enabled, it advertised a capability
-            # that does not exist. Disabled until a host actually runs it.
-            "url": None,
-            "model": "qwen2.5-7b-instruct-1m",
+            # ENABLED 2026-11-26. Live /v1/models on localhost:8082 returned
+            # id qwen2.5-7b-instruct, n_ctx 8192, Q4_K_M.
+            # llama-server, CPU-only (ngl=0). Systemd: llama-t1b.service.
+            # Privacy short-circuit routes strictest tasks here.
+            "url": "http://localhost:8082",
+            "model": "qwen2.5-7b-instruct",
             "fallback_model": None,
-            "max_prompt_tokens": 32768,
-            "enabled": False,
-            "tweak_notes": "DISABLED: no host on the LAN serves :8082. Was Lenovo M710Q CPU llama-server. Re-enable only after a live /v1/models probe returns 200.",
-            "quality_rating": 0.0,
+            "max_prompt_tokens": 8192,
+            "enabled": True,
+            "tweak_notes": "ENABLED 2026-11-26: Qwen2.5-7B-Instruct Q4_K_M on localhost:8082, n_ctx 8192, CPU-only (ngl=0). Systemd: llama-t1b.service.",
+            "quality_rating": 0.75,
             "vram_usage_gb": 0,
-            "context_tokens": 0,
+            "context_tokens": 8192,
             "alternative_models": {
-                "code": "qwen2.5-7b-instruct-1m (CPU, 7B, larger context)",
-                "chat": "qwen2.5-7b-instruct-1m (CPU, more knowledge than T1 3B)",
-                "reasoning": "qwen2.5-7b-instruct-1m (CPU, 7B for complex analysis)",
+                "code": "qwen2.5-7b-instruct (CPU, 7B, better code)",
+                "chat": "qwen2.5-7b-instruct (CPU, more knowledge than T1 3B)",
+                "reasoning": "qwen2.5-7b-instruct (CPU, 7B for complex analysis)",
             },
         },
         "T2": {
