@@ -3,10 +3,10 @@ Token Optimiser — Configuration
 
 UPDATED 2026-10-04 (CHG-2026-030) — corrected against the wire, not from memory:
 |- T1 endpoint: localhost:8081 (llama-server, Vulkan, RX 480)
-|- T1 model: phi-4-mini-instruct Q4_K_M, 3.84B, n_ctx 131072 (WAS: Phi-3.5-mini
-|  Q5_K_M / 4096 ctx / 3.0GB — a model that is not loaded. The server accepts any
-|  model name and silently substitutes, so the wrong name never errored.)
-|- T1 fallback: NONE. qwen2.5-coder-3b-instruct is not on this box.
+|- T1 model: qwen2.5-3b-instruct Q4_K_M, one slot, n_ctx 8192 (CHG-2026-064).
+|  The server accepts any model name and silently substitutes, so this name
+|  has to match the alias or the logs lie.
+|- T1 fallback: NONE. Coder-3B is on disk as a swap-in, not a fallback.
 |- T1b: ENABLED. localhost:8082 serves Qwen2.5-7B-Instruct-Q4_K_M
 |  via llama-server (CPU-only, ngl=0, n_ctx=8192). Systemd: llama-t1b.service.
 |  Privacy short-circuit routes strictest tasks here (air-gapped, local-only).
@@ -60,32 +60,26 @@ class TokenOptimiserConfig:
 
     tier_backends: dict = field(default_factory=lambda: {
         "T1": {
-            # VERIFIED against the wire 2026-10-04. This box IS localhost;
-            # the running server's own cmdline is:
-            #   llama-server -m .../Phi-4-mini-instruct-Q4_K_M.gguf -dev Vulkan0
-            #     -ngl 99 -c 131072 -ctk q4_0 --port 8081 --alias phi-4-mini-instruct
-            # /v1/models reports id=phi-4-mini-instruct, n_ctx=131072,
-            # n_params=3.84B. The old values (Phi-3.5-mini-Q5_K_M, 4096 ctx,
-            # 3.0GB) described a model that is not loaded. CRITICAL: this server
-            # accepts ANY model name and silently substitutes what it has, so a
-            # wrong name here never errors — it just misreports what it serves.
+            # VERIFIED 2026-11-26 (CHG-2026-064). /v1/models id=qwen2.5-3b-instruct,
+            # n_ctx=8192, n_params=3085938688. One slot. f16 KV, flash-attn on,
+            # batch 2048/512, Vulkan0, ngl 99. Peak VRAM about 2625 MiB.
+            # Generation about 66 tok/s. A 1053-token prompt about 380 tok/s.
+            # The server accepts any model name and substitutes what is loaded.
             "url": "http://localhost:8081",
-            "model": "phi-4-mini-instruct",
-            # No local fallback exists: qwen2.5-coder-3b-instruct is not on this
-            # box. Falling back to it can only produce a false claim. Escalate
-            # to T2 free instead, which is a real, working tier.
+            "model": "qwen2.5-3b-instruct",
+            # Coder-3B is on disk. It is a swap-in, not the resident model.
             "fallback_model": None,
-            "max_prompt_tokens": 32768,
+            "max_prompt_tokens": 8192,
             "enabled": True,
-            "tweak_notes": "Local llama-server on RX 480 (Vulkan). Phi-4-mini-instruct Q4_K_M, 3.84B, n_ctx 131072, q4_0 KV. ~40-90 tok/s measured. NOTE: 3B-class -- route substantive work to T2 free.",
+            "tweak_notes": "Local llama-server on RX 480 (Vulkan). Qwen2.5-3B-Instruct Q4_K_M, one slot, n_ctx 8192, f16 KV, flash-attn on. Measured 2026-11-26: about 66 tok/s generation, about 380 tok/s on a 1053-token prompt, peak VRAM about 2.6 GB. 3B-class: route substantive work to T2 free.",
             "quality_rating": 0.70,
-            "vram_usage_gb": 2.48,
-            "context_tokens": 131072,
+            "vram_usage_gb": 2.6,
+            "context_tokens": 8192,
             "alternative_models": {
-                "code": "Qwen2.5-Coder-7B-Instruct-IQ3_S (3.0GB, best code)",
-                "reasoning": "phi-4-mini-instruct Q4_K_M (2.5GB, best local reasoning)",
-                "agentic": "Qwen3.5-4B-Q4_K_M (2.4GB, tool calling)",
-                "fast": "Llama-3.2-3B-Instruct-Q4_K_M (2.0GB, fastest)",
+                "code": "Qwen2.5-Coder-3B-Instruct-Q4_K_M (on disk, not loaded)",
+                "reasoning": "qwen2.5-3b-instruct Q4_K_M (loaded on :8081)",
+                "spare": "Phi-4-mini-instruct-Q4_K_M (on disk, cold spare)",
+                "larger": "Qwen2.5-7B-Instruct-Q4_K_M (T1b CPU :8082, do not offload)",
             },
         },
         "T1b": {
